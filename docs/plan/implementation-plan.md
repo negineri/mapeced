@@ -138,8 +138,9 @@ pub struct MapeParams {
     pub port_ranges: Vec<(u16, u16)>, // 利用可能ポートレンジ一覧（MAP-E ポート集合 S）
     pub port_start: u16,              // nftables SNAT 用連続レンジ開始（ポート集合 C の先頭）
     pub port_end: u16,                // nftables SNAT 用連続レンジ終了（ポート集合 C の末尾）
-    /// 実効的な R 下限。`calc_a_min` の結果。`generate_tc_commands` 内での
-    /// ビット変換ロジック検証およびデバッグ用途で保持する。
+    /// 実効的な R 下限。`calc_a_min` の結果。
+    /// `calc_continuous_range` の PORT_START 計算（`(1 << 15) + (a_min << M)`）および
+    /// `generate_tc_commands` 内のレンジ計算に必要なため保持する。
     pub a_min: u16,
 }
 ```
@@ -180,6 +181,8 @@ pub fn derive_psid(ea_bits: u32, psid_len: u8) -> u16;
 
 /// CE の IPv6 アドレスを構成する（RFC 7597 モード）
 ///   IID: [0x0000(16)] [IPv4(32)] [PSID(16)]
+///   PSID フィールド（16 bit）への配置: RFC 7597 Section 5.2 に従い**右詰め**（`psid` をそのまま下位に配置）。
+///   `psid_len` は PSID 値が `psid_len` ビット幅に収まることの確認用。IID 構成時のシフト量には使用しない。
 pub fn build_ce_ipv6_rfc(
     rule_ipv6_prefix: u128,
     rule_prefix_len: u8,
@@ -192,6 +195,8 @@ pub fn build_ce_ipv6_rfc(
 
 /// CE の IPv6 アドレスを構成する（v6プラス非公開 Draft モード）
 ///   IID: [0x00(8)] [IPv4(32)] [PSID(16)] [0x00(8)]
+///   PSID フィールド（16 bit）への配置: v6プラス仕様に従い**左詰め**（`psid << (16 - psid_len)` で上位に詰める）。
+///   すなわち `v6plus-spec.md` の `psid << (16 - k)` に相当し、`psid_len` がシフト量の計算に使用される。
 pub fn build_ce_ipv6_v6plus(
     rule_ipv6_prefix: u128,
     rule_prefix_len: u8,
@@ -276,6 +281,7 @@ calc_continuous_range → (start, end)   // MAP-E ポートレンジと既に一
 ```
 
 `psid_len == 0` の場合は `start = 0, end = 65535`（全ポート）に自然に退化する。
+ただし `psid_offset == 0` かつ `psid_len == 0` のとき M = 16 となり、`psid << M` や `1u16 << M` が Rust の u16 シフト範囲（0–15）を超えてパニックするため、**この条件を関数冒頭で特別処理する**こと（`return vec![(0, u16::MAX)]` / `return (0, u16::MAX)`）。
 `psid_offset == 0` かつ `psid_len == 16` は M = 0 となり不正なため、後述のバリデーションで弾く。
 
 **`psid_offset + psid_len` バリデーション**（実装箇所: `dhcpv6/parser.rs` および `map/v6plus_rules.rs` のルール構築時）:
@@ -324,7 +330,7 @@ OPTION_S46_CONT_MAPE (code 94)
 - `OPTION_S46_BR` が存在しない場合は `MapEError::MissingBrAddress` を返す
 - DHCPv6 Message Type は Advertise（2）と Reply（7）のみ受理し、それ以外はスキップする
 - OPTION_S46_RULE 内の PSID は後続処理で EA-bits から上書き計算するため、パース時は参考値として保持するだけで良い
-- `OPTION_S46_PORTPARAMS` の PSID フィールド（2 バイト）は RFC 7598 に従い**左詰め**（MSB 側に `psid_len` ビット分の値を格納）。パース時は `u16::from_be_bytes(...)` で読み出した後、`>> (16 - psid_len)` で右詰めの整数値に変換して `PortParams::psid` に格納する
+- `OPTION_S46_PORTPARAMS` の PSID フィールド（2 バイト）は RFC 7598 に従い**左詰め**（MSB 側に `psid_len` ビット分の値を格納）。パース時は `u16::from_be_bytes(...)` で読み出した後、`>> (16 - psid_len)` で右詰めの整数値に変換して `PortParams::psid` に格納する。ただし **`psid_len == 0` の場合はシフトを行わず `psid = 0` を直接格納すること**（`>> 16` は u16 のシフト範囲を超えて debug ビルドでパニックする）
 
 公開 API:
 ```rust
@@ -351,7 +357,7 @@ pub async fn run_capture(
 
 #### ステップ 3-3 詳細: `dhcpv6/lease_watcher.rs`
 
-- `inotify` で `/run/systemd/netif/leases/<ifindex>` ファイルへの `IN_CLOSE_WRITE` | `IN_MOVED_TO` イベントを監視する
+- `inotify` で `/run/systemd/netif/leases/<ifindex>` ファイルへの `IN_CLOSE_WRITE` | `IN_MOVED_TO` イベントを監視する。**ファイルが起動時に存在しない場合、直接 watch できないため親ディレクトリ `/run/systemd/netif/leases/` を `IN_CLOSE_WRITE` | `IN_MOVED_TO` で監視し、イベント発生時にファイル名が `<ifindex>` と一致するもののみ処理する**
 - インターフェース名 → ifindex の変換には `nix::net::if_::if_nametoindex` を使用する
 - リースファイルはシェル変数形式（`KEY=VALUE`）で記述されているため、正規表現を用いず行単位で `=` 分割して解析する
 - 取得対象フィールド: `PREFIXES`（IA_PD プレフィックス。スペース区切り複数件あり）
@@ -615,6 +621,15 @@ tc filter add dev <tunnel_iface> parent ffff: protocol ip u32 \
 
 tc pedit のビット変換ロジック（`docs/mape-port-allocation.md` 準拠）。ここでの `M` はポート下位フィールドのビット幅 `M = 16 - psid_offset - psid_len`（v6プラスは 4）を指す。
 
+**tc pedit の実装方針（一意化のため明記）**:
+
+tc pedit の `munge` 操作は固定マスク/値の静的適用であり、「ビット値を条件として別ビットへ移動する」動的なビット複製を1命令では実現できない。そのため、**egress の送信方向は有効な R 値（`a_min` から `2^psid_offset - 1` まで）ごとに個別の tc filter + pedit ルールを生成する**方針を採用する。
+
+各 R 値に対して filter が `u16 match <R << (psid_len+M)> <r_val_mask> at nexthdr+2`（TCP/UDP 送信元ポートフィールド）でマッチし、対応する pedit が C ポートを S ポートへ変換する固定値ルールを適用する。
+
+- v6plus（A=4）の場合: R ∈ [1, 15] の 15 値 × プロトコル（TCP/UDP）= 最大 30 filter ルール（egress）
+- `generate_tc_commands` はこのループを生成する
+
 **送信方向（連続レンジ C → MAP-E ポート集合 S）**:
 1. `R`（= a）の MSB が立っていない場合は `0x8000` ビットを下ろす（PORT_START の MSB=1 をクリア）
 2. 残りの `R` フィールドのビットを確認し、立っているものを対応する上位ビット（`bit[M+psid_len+R_bit_pos]`）に展開する
@@ -733,14 +748,24 @@ pub async fn run(config: Config) -> Result<(), MapEError>;
 
 イベントループの構造:
 
+`use_v6plus_static_rules = true` の場合は DHCPv6 capture タスクを spawn しないため、`capture_rx` は `Option<mpsc::Receiver<Vec<MapRule>>>` 型として保持し、`None` の場合は `select!` の capture アームを無効化する。具体的には `tokio::select!` の当該アームを `if let Some(ref mut rx) = capture_rx_opt` ガード付きで定義するか、`futures::future::pending()` で永遠にブロックするダミー Future に差し替える。
+
 ```rust
+// capture_rx_opt: Option<mpsc::Receiver<Vec<MapRule>>>
 loop {
     tokio::select! {
         // IA_PD プレフィックス変化（lease_watcher からの watch チャネル）
         Ok(()) = lease_rx.changed() => { ... }
 
         // DHCPv6 capture から MAP Rule 受信（mpsc チャネル）
-        Some(rules) = capture_rx.recv() => { ... }
+        // use_v6plus_static_rules = true の場合は capture_rx_opt が None のため
+        // このアームは永遠に select されない
+        Some(rules) = async {
+            match capture_rx_opt.as_mut() {
+                Some(rx) => rx.recv().await,
+                None => futures::future::pending().await,
+            }
+        } => { ... }
 
         // SIGTERM / SIGINT（tokio::signal）
         _ = signal::ctrl_c() => { break; }
@@ -755,10 +780,10 @@ lifecycle::cleanup(&mut state, ...).await?;
 1. WAN ifindex を `if_nametoindex` で取得
 2. `config.use_v6plus_static_rules = false` かつ `config.map_rules_cache_file` が `Some` の場合のみ: キャッシュファイルが存在すれば読み込んで `pending_map_rules` に設定する（`use_v6plus_static_rules = true` の場合は次のステップで静的ルールを設定するためキャッシュ読み込みは不要）
 3. `config.use_v6plus_static_rules = true` の場合は v6plus_rules を `pending_map_rules` に設定
-4. `lease_watcher` を tokio タスクとして spawn する。`config.use_v6plus_static_rules = false` の場合のみ `dhcpv6::capture` タスクも spawn する（`true` の場合は DHCPv6 からのルール取得が不要なため spawn しない）
+4. `lease_watcher` を tokio タスクとして spawn する（`watch::channel(None)` で初期値 `None` のチャネルを生成し `tx` を渡す）。`config.use_v6plus_static_rules = false` の場合のみ `dhcpv6::capture` タスクも spawn し `capture_rx_opt = Some(rx)` とする。`true` の場合は `capture_rx_opt = None`
 5. 既存の MAP-E 由来設定をクリーンアップ（再起動時の冪等性確保）:
-   - `nft delete table ip mapeced` を実行（存在しない場合はエラーを無視）
-   - `if_nametoindex(config.tunnel_interface)` で既存トンネルを確認し、存在する場合は tc qdisc を削除した後にトンネルインターフェースを削除する
+   - `nft delete table ip mapeced` を `std::process::Command` で実行し、終了コードを確認する。nft コマンドがゼロ以外で終了した場合は stderr 文字列に `"No such file or directory"` または `"Could not process rule"` が含まれるかを確認し、テーブル未存在由来のエラーであれば無視する（それ以外は `MapEError::NftError` として伝播）
+   - `if_nametoindex(config.tunnel_interface)` で既存トンネルを確認し、存在する場合は `tc qdisc del dev <tunnel_interface> root 2>/dev/null` および `tc qdisc del dev <tunnel_interface> ingress 2>/dev/null` を実行した後にトンネルインターフェースを削除する
 6. イベントループ開始
 
 終了時シーケンス（SIGTERM / SIGINT 受信後）:
@@ -788,6 +813,7 @@ lifecycle::cleanup(&mut state, ...).await?;
 | `tracing-subscriber` | 0.3 | ログ初期化（stderr 出力・フィルタ） |
 | `tracing-journald` | 0.3 | systemd-journald 出力 |
 | `thiserror` | 2 | エラー型定義 |
+| `anyhow` | 1 | `main` や統合テストでの汎用エラー伝播（`MapEError` 以外の一時的エラーラップ用）。既に `Cargo.toml` に含まれる |
 | `serde` | 1 | シリアライズ |
 | `serde_json` | 1 | MAP ルールキャッシュ |
 | `toml` | 0.8 | 設定ファイル読み込み |
