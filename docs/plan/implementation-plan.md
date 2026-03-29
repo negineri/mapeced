@@ -49,7 +49,7 @@ src/
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1-1      | `error.rs` に `MapEError` 定義（thiserror）。定義すべき主要 variant: `ConfigNotFound { path: PathBuf }`, `InvalidConfig(String)`, `InvalidCePrefix`（EA-bits 長と CE prefix 長の不一致）, `NoPrefixMatch`（IA_PD にマッチする MAP Rule が `pending_map_rules` に存在しない場合。`try_compute` が `Err` を返す際に使用）, `MissingBrAddress`（`OPTION_S46_BR` が省略された場合）, `EmptyPortRanges`（`calc_port_ranges` の結果が空の場合の nftables 適用ガード）, `NetlinkError(String)`（Netlink 操作失敗）, `NftError(String)`（nft コマンド実行失敗） |
 | 1-2      | `config.rs` の型定義と serde デシリアライズ（詳細は下記参照）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 1-3      | `cli.rs` の clap Derive 実装。`--config <PATH>`（デフォルト: `/etc/mapeced/config.toml`）と `--log-level <LEVEL>`（デフォルト: `info`）をグローバルオプションとして追加。サブコマンドのシグネチャのみ定義する（`start` / `status` / `stop`）。`status` と `stop` の実体は Phase 6（ステップ 6-4）で実装する。`status`: `pid_file` を読んでプロセスが生存中か確認し結果を表示。`stop`: `pid_file` を読んで SIGTERM を送信。 |
+| 1-3      | `cli.rs` の clap Derive 実装。サブコマンドなし。`--config <PATH>`（デフォルト: `/etc/mapeced/config.toml`）と `--log-level <LEVEL>`（デフォルト: `info`）のみ定義する。起動・停止・状態確認は systemctl に委譲する（`systemctl start/stop/status mapeced`）。 |
 | 1-4      | `main.rs` に tokio ランタイム + ロガー初期化（`tracing-subscriber`。`--log-level` 値を反映し、`/run/systemd/journal/socket` が存在する場合は `tracing-journald` を優先し、そうでない場合は stderr に出力）                                                                                                                                                                                                                                                                                                                                              |
 
 テスト: `config.rs` のフィールドごとにデシリアライズ単体テスト。デフォルト値・必須バリデーションの確認。
@@ -76,7 +76,6 @@ src/
 | `upstream_interface` | `String` | 必須 | WAN 側インターフェース名 |
 | `tunnel_interface` | `String` | 必須 | ip6tnl トンネル名 |
 | `tunnel_mtu` | `Option<u32>` | `None`（設定しない） | トンネル MTU（1280–65535） |
-| `pid_file` | `PathBuf` | `/run/mapeced.pid` | PID ファイルパス |
 | `map_rules_cache_file` | `Option<PathBuf>` | `None`（キャッシュなし） | MAP ルールキャッシュ JSON パス |
 | `use_v6plus_static_rules` | `bool` | `true` | `true` の場合 v6プラス静的 BMR を使用し DHCPv6 capture からのルール更新を無視する |
 | `p_exclude_max` | `u16` | `1023` | 除外するポート上限（inclusive）。0–1023 は Well-Known Ports |
@@ -569,7 +568,7 @@ impl TcManager {
 | 6-1 | `daemon/state.rs` に `DaemonState` 型を定義する |
 | 6-2 | `daemon/lifecycle.rs` に `apply` / `update` / `cleanup` を実装する |
 | 6-3 | `daemon/runner.rs` に tokio `select!` イベントループを実装する |
-| 6-4 | `main.rs` を更新して `start` サブコマンドからデーモンを起動する |
+| 6-4 | `main.rs` を更新してサブコマンドなしで `daemon::runner::run(config)` を直接呼び出す。プロセスはフォアグラウンドで動作し続け、SIGTERM / SIGINT で graceful shutdown する。PID 管理・起動/停止は systemd に委譲する。 |
 
 テスト: `lifecycle.rs` の差分検出ロジック（変化なしで何もしない）を単体テストでカバーする。
 
@@ -650,20 +649,18 @@ lifecycle::cleanup(&mut state, ...).await?;
 ```
 
 起動時シーケンス:
-1. PID ファイル書き込み（`config.pid_file` パス）
-2. WAN ifindex を `if_nametoindex` で取得
-3. MAP ルールキャッシュファイルが存在すれば読み込んで `pending_map_rules` に設定（`config.map_rules_cache_file` が `Some` の場合のみ）
-4. `config.use_v6plus_static_rules = true` の場合は v6plus_rules を `pending_map_rules` に設定（キャッシュより優先）
-5. `lease_watcher` と `dhcpv6::capture` を tokio タスクとして spawn
-6. 既存の MAP-E 由来設定をクリーンアップ（再起動時の冪等性確保）:
+1. WAN ifindex を `if_nametoindex` で取得
+2. MAP ルールキャッシュファイルが存在すれば読み込んで `pending_map_rules` に設定（`config.map_rules_cache_file` が `Some` の場合のみ）
+3. `config.use_v6plus_static_rules = true` の場合は v6plus_rules を `pending_map_rules` に設定（キャッシュより優先）
+4. `lease_watcher` と `dhcpv6::capture` を tokio タスクとして spawn
+5. 既存の MAP-E 由来設定をクリーンアップ（再起動時の冪等性確保）:
    - `nft delete table ip mapeced` を実行（存在しない場合はエラーを無視）
    - `if_nametoindex(config.tunnel_interface)` で既存トンネルを確認し、存在する場合は tc qdisc を削除した後にトンネルインターフェースを削除する
-7. イベントループ開始
+6. イベントループ開始
 
 終了時シーケンス（SIGTERM / SIGINT 受信後）:
 1. `cleanup` を呼び出して全設定を削除
-2. PID ファイルを削除
-3. プロセス終了（exit code 0）
+2. プロセス終了（exit code 0）
 
 ---
 
@@ -682,13 +679,17 @@ lifecycle::cleanup(&mut state, ...).await?;
 
 | クレート | バージョン目安 | 用途 |
 | -------- | -------------- | ---- |
+| `tokio` | 1 | 非同期ランタイム（features: full） |
+| `clap` | 4 | CLI 定義（features: derive） |
+| `tracing` | 0.1 | ログ emit マクロ（`info!`/`debug!` 等） |
+| `tracing-subscriber` | 0.3 | ログ初期化（stderr 出力・フィルタ） |
+| `tracing-journald` | 0.3 | systemd-journald 出力 |
 | `thiserror` | 2 | エラー型定義 |
 | `serde` | 1 | シリアライズ |
 | `serde_json` | 1 | MAP ルールキャッシュ |
 | `toml` | 0.8 | 設定ファイル読み込み |
 | `nix` | 0.29 | AF_PACKET ソケット・inotify・if_nametoindex |
 | `rtnetlink` | 0.14 | Netlink 操作（`netlink-packet-route` を内包） |
-| `tracing-journald` | 0.3 | systemd-journald 出力 |
 
 ---
 
