@@ -307,6 +307,8 @@ mod tests {
             port_end,
             a_min,
             is_fmr: false,
+            fmr_ipv4_prefix: Ipv4Addr::UNSPECIFIED,
+            fmr_prefix4_len: 0,
         }
     }
 
@@ -326,6 +328,8 @@ mod tests {
             port_end: 1535,
             a_min: 0,
             is_fmr: false,
+            fmr_ipv4_prefix: Ipv4Addr::UNSPECIFIED,
+            fmr_prefix4_len: 0,
         }
     }
 

@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod daemon;
 mod dhcpv6;
 mod error;
 mod map;
@@ -19,13 +20,28 @@ async fn main() {
 
     init_tracing(&cli.log_level);
 
-    let _config = match load_config(&cli.config) {
+    let config = match load_config(&cli.config) {
         Ok(c) => c,
         Err(e) => {
             error!("{e}");
             std::process::exit(1);
         }
     };
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) = daemon::runner::run(config).await {
+            error!("{e}");
+            std::process::exit(1);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = config;
+        error!("mapeced only supports Linux");
+        std::process::exit(1);
+    }
 }
 
 fn init_tracing(log_level: &str) {

@@ -102,6 +102,8 @@ impl MapRule {
             port_end,
             a_min,
             is_fmr: self.is_fmr,
+            fmr_ipv4_prefix: self.ipv4_prefix,
+            fmr_prefix4_len: self.prefix4_len,
         })
     }
 }
@@ -133,4 +135,8 @@ pub struct MapeParams {
     pub a_min: u16,
     /// マッチした `MapRule::is_fmr` の値。`try_compute` が `self.is_fmr` をそのままコピーする。
     pub is_fmr: bool,
+    /// マッチした `MapRule::ipv4_prefix`。FMR ルート設定時（`is_fmr == true`）に使用する。
+    pub fmr_ipv4_prefix: Ipv4Addr,
+    /// マッチした `MapRule::prefix4_len`。FMR ルート設定時（`is_fmr == true`）に使用する。
+    pub fmr_prefix4_len: u8,
 }
