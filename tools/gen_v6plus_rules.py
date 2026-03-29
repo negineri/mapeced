@@ -4,26 +4,27 @@ v6plus MAP ルール生成スクリプト。
 
 https://ipv4.web.fc2.com/map-e.html から 3 テーブル
 （ruleprefix38 / ruleprefix31 / ruleprefix38_20）を取得・解析し、
-src/map/v6plus_rules.rs を生成する。
+assets/static_rules.json を生成する。
 
 使用方法:
     # URL から自動取得（デフォルト）
-    python tools/gen_v6plus_rules.py --output src/map/v6plus_rules.rs
+    python tools/gen_v6plus_rules.py --output assets/static_rules.json
 
     # 既存の JS ファイルを使用
     python tools/gen_v6plus_rules.py --input docs/v6plus-maprule.js \
-        --output src/map/v6plus_rules.rs
+        --output assets/static_rules.json
 
 更新手順:
     1. 本スクリプトを実行する（--input 省略で自動取得）
     2. 生成物をコミットする
 
 検証:
-    cargo test -- v6plus でゴールデンテストと件数一致テストを実行する。
+    cargo test -- static_rules でゴールデンテストと件数一致テストを実行する。
 """
 
 import argparse
-import hashlib
+import ipaddress
+import json
 import re
 import sys
 import tempfile
@@ -296,93 +297,38 @@ def check_no_overlap_between_38_20_and_br_conditions(
 
 
 # ────────────────────────────────────────────────────────────────────
-# Rust コード生成
+# JSON 生成
 # ────────────────────────────────────────────────────────────────────
 
 
-def ipv6_hextet_to_new_args(hextets: list[int]) -> str:
-    """hextet リストを Ipv6Addr::new(...) の引数文字列に変換する。"""
-    return ", ".join(f"0x{h:04x}" for h in hextets)
+def rule_to_json_entry(r: MapRuleData) -> dict:
+    """MapRuleData を static_rules.json の RuleEntry 形式の dict に変換する。"""
+    packed = b"".join(h.to_bytes(2, "big") for h in r.ipv6_hextet)
+    ipv6_addr = str(ipaddress.IPv6Address(packed))
+    ipv4_addr = "{}.{}.{}.{}".format(*r.ipv4_octets)
+    return {
+        "br_addr": r.br_address,
+        "psid_offset": r.psid_offset,
+        "psid_len": r.psid_length,
+        "ipv4_prefix": ipv4_addr,
+        "prefix4_len": r.ipv4_prefix_len,
+        "ipv6_prefix": ipv6_addr,
+        "prefix6_len": r.ipv6_prefix_len,
+        "ea_len": r.ea_length,
+        "is_fmr": False,
+    }
 
 
-def ipv4_octets_to_new_args(octets: list[int]) -> str:
-    """オクテットリストを Ipv4Addr::new(...) の引数文字列に変換する。"""
-    return ", ".join(str(o) for o in octets)
-
-
-def br_addr_to_new_args(addr: str) -> str:
-    """BR アドレス文字列を Ipv6Addr::new(...) の引数文字列に変換する。"""
-    # IPv6 アドレスを展開して 8 グループの 16 進数に変換する
-    import ipaddress
-
-    ip = ipaddress.IPv6Address(addr)
-    packed = ip.packed
-    groups = []
-    for i in range(0, 16, 2):
-        groups.append((packed[i] << 8) | packed[i + 1])
-    return ", ".join(f"0x{g:04x}" for g in groups)
-
-
-def generate_rust_code(
-    rules: list[MapRuleData],
-    input_file: str,
-    file_sha256: str,
-) -> str:
-    """MapRuleData のリストから Rust ソースコードを生成する。"""
-    n = len(rules)
-
-    lines = []
-    lines.append("// このファイルは自動生成されています。直接編集しないでください。")
-    lines.append(f"// 生成元: {input_file}")
-    lines.append(f"// 生成元 SHA256: {file_sha256}")
-    lines.append(f"// 総件数: {n}")
-    lines.append("//")
-    lines.append("// 更新手順:")
-    lines.append(f"//   python tools/gen_v6plus_rules.py --input {input_file} \\")
-    lines.append("//       --output src/map/v6plus_rules.rs")
-    lines.append("")
-    lines.append("use std::net::{Ipv4Addr, Ipv6Addr};")
-    lines.append("")
-    lines.append("use ipnet::{Ipv4Net, Ipv6Net};")
-    lines.append("")
-    lines.append("use crate::map::rule::{MapRule, PortParams};")
-    lines.append("")
-    lines.append(f"static RULES: [MapRule; {n}] = [")
-
-    for r in rules:
-        ip6_args = ipv6_hextet_to_new_args(r.ipv6_hextet)
-        ip4_args = ipv4_octets_to_new_args(r.ipv4_octets)
-        br_args = br_addr_to_new_args(r.br_address)
-        lines.append("    MapRule {")
-        lines.append(
-            f"        ipv6_prefix: Ipv6Net::new_assert(Ipv6Addr::new({ip6_args}), {r.ipv6_prefix_len}),"
-        )
-        lines.append(
-            f"        ipv4_prefix: Ipv4Net::new_assert(Ipv4Addr::new({ip4_args}), {r.ipv4_prefix_len}),"
-        )
-        lines.append(f"        ea_length: {r.ea_length},")
-        lines.append(f"        is_fmr: true,")
-        lines.append(f"        br_address: Ipv6Addr::new({br_args}),")
-        lines.append(f"        port_params: PortParams {{")
-        lines.append(f"            psid_offset: {r.psid_offset},")
-        lines.append(f"            psid_length: {r.psid_length},")
-        lines.append(f"        }},")
-        lines.append("    },")
-
-    lines.append("];")
-    lines.append("")
-    lines.append("/// v6プラス向け静的 MAP ルール。")
-    lines.append("///")
-    lines.append("/// テーブル優先順: ruleprefix38 → ruleprefix31 → ruleprefix38_20。")
-    lines.append("/// 各テーブル内はキー昇順（数値昇順）で固定。")
-    lines.append("pub static V6PLUS_MAP_RULES: &[MapRule] = &RULES;")
-    lines.append("")
-    lines.append(f"pub const RULE_COUNT: usize = {n};")
-    lines.append("")
-    lines.append("const _: () = assert!(V6PLUS_MAP_RULES.len() == RULE_COUNT);")
-    lines.append("")
-
-    return "\n".join(lines)
+def generate_json(rules: list[MapRuleData]) -> str:
+    """MapRuleData のリストから assets/static_rules.json 形式の JSON を生成する。"""
+    lines = ["{\n", '  "rules": [\n']
+    for i, r in enumerate(rules):
+        entry = rule_to_json_entry(r)
+        comma = "," if i < len(rules) - 1 else ""
+        lines.append("    " + json.dumps(entry, ensure_ascii=False) + comma + "\n")
+    lines.append("  ]\n")
+    lines.append("}\n")
+    return "".join(lines)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -401,7 +347,7 @@ def main() -> None:
         default=DEFAULT_URL,
         help=f"取得元 HTML URL（--input 省略時に使用、デフォルト: {DEFAULT_URL}）",
     )
-    parser.add_argument("--output", required=True, help="出力 Rust ファイルパス")
+    parser.add_argument("--output", required=True, help="出力 JSON ファイルパス")
     args = parser.parse_args()
 
     if args.input:
@@ -415,9 +361,6 @@ def main() -> None:
         js_content, tmp_path = fetch_and_extract_js(args.url)
         print(f"HTML を一時保存: {tmp_path}", file=sys.stderr)
         input_label = args.url
-
-    # SHA256 計算
-    file_sha256 = hashlib.sha256(js_content.encode("utf-8")).hexdigest()
 
     # テーブルパラメータ検証
     for table_name, params in TABLE_PARAMS.items():
@@ -453,12 +396,12 @@ def main() -> None:
 
     print(f"合計: {len(all_rules)} エントリ", file=sys.stderr)
 
-    # Rust コード生成
-    rust_code = generate_rust_code(all_rules, input_label, file_sha256)
+    # JSON 生成
+    json_content = generate_json(all_rules)
 
     # 出力ファイル書き込み
     with open(args.output, "w", encoding="utf-8") as f:
-        f.write(rust_code)
+        f.write(json_content)
 
     print(f"生成完了: {args.output}", file=sys.stderr)
 
