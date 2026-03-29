@@ -36,7 +36,7 @@ static RULES_JSON: &str = include_str!("../../assets/v6plus_rules.json");
 /// アプリケーションに静的に埋め込む方針をとる（`docs/v6plus-spec.md` 参照）。
 ///
 /// ルールは `assets/v6plus_rules.json` にコンパイル時埋め込みされる。
-/// `port_params.psid` はプレースホルダーとして `0` を設定する（実際の PSID は `try_compute` が上書き）。
+/// `port_params.psid` は `None`（実際の PSID は `try_compute` が EA-bits から算出する）。
 ///
 /// # Panics
 /// `assets/v6plus_rules.json` の JSON が不正な場合にパニックする。
@@ -60,7 +60,7 @@ fn build_rules() -> Vec<MapRule> {
             port_params: PortParams {
                 psid_offset: file.psid_offset,
                 psid_len: file.psid_len,
-                psid: 0, // プレースホルダー（try_compute が上書き）
+                psid: None,
             },
             br_addr: file.br_addr,
             is_fmr: entry.is_fmr,

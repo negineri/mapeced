@@ -150,7 +150,7 @@ fn parse_s46_rule(data: &[u8]) -> Result<MapRule, MapEError> {
         PortParams {
             psid_offset: 0,
             psid_len: 0,
-            psid: 0,
+            psid: None,
         }
     };
 
@@ -196,7 +196,7 @@ fn parse_portparams(data: &[u8]) -> Result<PortParams, MapEError> {
     Ok(PortParams {
         psid_offset,
         psid_len,
-        psid,
+        psid: Some(psid),
     })
 }
 
@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(rule.prefix6_len, 64);
         assert_eq!(rule.port_params.psid_offset, 4);
         assert_eq!(rule.port_params.psid_len, 8);
-        assert_eq!(rule.port_params.psid, 0);
+        assert_eq!(rule.port_params.psid, Some(0));
         assert_eq!(
             rule.br_addr,
             "2404:9200:225:100::64".parse::<Ipv6Addr>().unwrap()
@@ -378,6 +378,6 @@ mod tests {
         let rule = &rules[0];
         assert_eq!(rule.port_params.psid_offset, 0);
         assert_eq!(rule.port_params.psid_len, 0);
-        assert_eq!(rule.port_params.psid, 0);
+        assert_eq!(rule.port_params.psid, None);
     }
 }

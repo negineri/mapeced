@@ -300,7 +300,7 @@ mod tests {
             port_params: PortParams {
                 psid_offset: 4,
                 psid_len: 8,
-                psid,
+                psid: Some(psid),
             },
             port_ranges,
             port_start,
@@ -321,7 +321,7 @@ mod tests {
             port_params: PortParams {
                 psid_offset: 0,
                 psid_len: 8,
-                psid: 5,
+                psid: Some(5),
             },
             port_ranges: vec![],
             port_start: 1280,

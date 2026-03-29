@@ -46,7 +46,10 @@ impl MapRule {
         let ipv4_addr =
             calc::derive_ipv4_addr(ea_bits, self.ipv4_prefix, self.prefix4_len, self.port_params.psid_len);
 
-        let psid = calc::derive_psid(ea_bits, self.port_params.psid_len);
+        let psid = self
+            .port_params
+            .psid
+            .unwrap_or_else(|| calc::derive_psid(ea_bits, self.port_params.psid_len));
 
         let ce_ipv6_addr = if use_v6plus {
             calc::build_ce_ipv6_v6plus(
@@ -89,7 +92,7 @@ impl MapRule {
         );
 
         let mut port_params = self.port_params.clone();
-        port_params.psid = psid;
+        port_params.psid = Some(psid);
 
         Ok(MapeParams {
             ipv4_addr,
@@ -113,9 +116,12 @@ pub struct PortParams {
     pub psid_offset: u8, // a: PSID offset（v6プラスは 4）
     pub psid_len: u8,    // k: PSID length（v6プラスは 8）
     /// この CE に割り当てられた PSID 値。
-    /// DHCPv6 パース時は受信値を格納するが、`try_compute` では EA-bits から再計算した値で上書きする。
-    /// `v6plus_rules.rs` の静的ルール構築時はプレースホルダーとして `0` を設定する（実際の PSID は `try_compute` が上書き）。
-    pub psid: u16,
+    /// `Some(v)` の場合は DHCPv6 の OPTION_S46_PORTPARAMS 等で明示的に割り当てられた値を表し、
+    /// `try_compute` はこの値をそのまま使用する。
+    /// `None` の場合は `try_compute` が CE プレフィックスの EA-bits から算出する。
+    /// 静的ルール（v6plus / ocn_vc）では `None` を設定する。
+    #[serde(default)]
+    pub psid: Option<u16>,
 }
 
 /// CE（Customer Edge）に対して計算された MAP-E パラメータ一式。
@@ -124,8 +130,9 @@ pub struct MapeParams {
     pub ipv4_addr: Ipv4Addr,    // CE の IPv4 アドレス
     pub ce_ipv6_addr: Ipv6Addr, // CE の IPv6 アドレス（トンネル local）
     pub br_ipv6_addr: Ipv6Addr, // BR の IPv6 アドレス（トンネル remote）
-    /// PSID 値。`port_params.psid` と常に同値であり `try_compute` が設定する。
-    /// nftables / tc コマンド生成時の利便性のため冗長に保持する。
+    /// PSID 値。`try_compute` が設定する解決済みの値。
+    /// `port_params.psid` が `Some` の場合はその値をそのまま使用し、
+    /// `None` の場合は EA-bits から算出した値が格納される。
     pub psid: u16,
     pub port_params: PortParams,
     pub port_ranges: Vec<(u16, u16)>, // 利用可能ポートレンジ一覧（MAP-E ポート集合 S）
