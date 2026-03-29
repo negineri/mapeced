@@ -217,10 +217,14 @@ pub fn build_ce_ipv6_v6plus(
 pub fn calc_a_min(psid_offset: u8, psid_len: u8, p_exclude_max: u16) -> u16;
 
 /// 利用可能なポートレンジ一覧を返す
-/// Port(R, m) = (R << (psid_len + M)) + (psid << M) + m
-/// R ∈ [a_min, 2^psid_offset - 1], m ∈ [0, 2^M - 1]
-/// ただし M = 16 - psid_offset - psid_len
-/// 前提: psid_offset + psid_len < 16
+/// psid_offset > 0 の場合:
+///   Port(R, m) = (R << (psid_len + M)) + (psid << M) + m
+///   R ∈ [a_min, 2^psid_offset - 1], m ∈ [0, 2^M - 1]
+///   ただし M = 16 - psid_offset - psid_len
+///   前提: psid_offset + psid_len < 16
+/// psid_offset == 0 の場合:
+///   単一連続ブロック vec![(psid << M, psid << M + (1 << M) - 1)]
+///   ただし M = 16 - psid_len（a_min は使用しない）
 pub fn calc_port_ranges(
     psid_offset: u8,
     psid_len: u8,
@@ -229,18 +233,36 @@ pub fn calc_port_ranges(
 ) -> Vec<(u16, u16)>;
 
 /// nftables SNAT 用連続レンジを返す
-/// PORT_START = (1 << 15) + (a_min << M)
-/// PORT_END   = PORT_START + (2^psid_offset - a_min) * 2^M - 1
-/// ただし M = 16 - psid_offset - psid_len
-/// 前提: psid_offset + psid_len < 16
+/// psid_offset > 0 の場合:
+///   PORT_START = (1 << 15) + (a_min << M)
+///   PORT_END   = PORT_START + (2^psid_offset - a_min) * 2^M - 1
+///   ただし M = 16 - psid_offset - psid_len
+///   前提: psid_offset + psid_len < 16
+/// psid_offset == 0 の場合:
+///   PORT_START = psid << M  （M = 16 - psid_len）
+///   PORT_END   = PORT_START + (1 << M) - 1
+///   tc 変換不要のためそのまま MAP-E ポートレンジと一致する
 pub fn calc_continuous_range(
     psid_offset: u8,
     psid_len: u8,
+    psid: u16,
     a_min: u16,
 ) -> (u16, u16);
 ```
 
-`psid_offset == 0` の場合（RFC 定義の連続ポート）は tc 変換不要の特殊ケースとして `calc_port_ranges` は `vec![(0, 65535)]`、`calc_continuous_range` は `(0, 65535)` を返す。このとき `psid_len` も 0 になるため `psid_offset + psid_len < 16` は自明に満たされる。
+`psid_offset == 0` の場合（RFC 定義の「R フィールドなし・単一連続ブロック」）は tc 変換不要の特殊ケースとして扱う。
+CE に割り当てられるポートは PSID に対応する単一の連続ブロックであり、`psid_len` の値に関わらず次式で求まる:
+
+```
+M = 16 - psid_len
+start = psid << M
+end   = start + (1 << M) - 1
+calc_port_ranges      → vec![(start, end)]
+calc_continuous_range → (start, end)   // MAP-E ポートレンジと既に一致
+```
+
+`psid_len == 0` の場合は `start = 0, end = 65535`（全ポート）に自然に退化する。
+`psid_offset == 0` かつ `psid_len == 16` は M = 0 となり不正なため、後述のバリデーションで弾く。
 
 **`config.rs` バリデーション追加**（`OPTION_S46_PORTPARAMS` を設定ファイルで指定する場合を含む）:
 - `psid_offset + psid_len < 16` を満たさない場合は `MapEError::InvalidConfig` を返す（M > 0 が必須）
