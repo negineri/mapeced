@@ -4,7 +4,7 @@ use libc;
 use nix::net::if_::if_nametoindex;
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::error::MapEError;
 use crate::map::rule::MapRule;
@@ -177,6 +177,7 @@ pub async fn run_capture(
 
         match result {
             Ok(Ok(n)) => {
+                debug!("received {} bytes on DHCPv6 socket", n);
                 if let Some(dhcpv6_payload) = extract_dhcpv6_payload(&buf[..n]) {
                     match parse_mape_option(dhcpv6_payload) {
                         Ok(Some(rules)) => {

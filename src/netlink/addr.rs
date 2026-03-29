@@ -39,16 +39,16 @@ pub async fn del_ipv6_addr(
         .map_err(|e| MapEError::NetlinkError(e.to_string()))?
     {
         for attr in &msg.attributes {
-            if let AddressAttribute::Address(a) = attr {
-                if *a == target {
-                    handle
-                        .address()
-                        .del(msg)
-                        .execute()
-                        .await
-                        .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
-                    return Ok(());
-                }
+            if let AddressAttribute::Address(a) = attr
+                && *a == target
+            {
+                handle
+                    .address()
+                    .del(msg)
+                    .execute()
+                    .await
+                    .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
+                return Ok(());
             }
         }
     }
@@ -88,16 +88,16 @@ pub async fn del_ipv4_addr(
         .map_err(|e| MapEError::NetlinkError(e.to_string()))?
     {
         for attr in &msg.attributes {
-            if let AddressAttribute::Address(a) = attr {
-                if *a == target {
-                    handle
-                        .address()
-                        .del(msg)
-                        .execute()
-                        .await
-                        .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
-                    return Ok(());
-                }
+            if let AddressAttribute::Address(a) = attr
+                && *a == target
+            {
+                handle
+                    .address()
+                    .del(msg)
+                    .execute()
+                    .await
+                    .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
+                return Ok(());
             }
         }
     }

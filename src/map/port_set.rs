@@ -12,7 +12,7 @@ pub fn calc_a_min(psid_offset: u8, psid_len: u8, p_exclude_max: u16) -> u16 {
     let divisor = 1u32 << (psid_len + m_bits); // 2^(psid_len + M)
     let numerator = p_exclude_max as u32 + 1;
     // ceil(numerator / divisor) = (numerator + divisor - 1) / divisor
-    let a_min = (numerator + divisor - 1) / divisor;
+    let a_min = numerator.div_ceil(divisor);
     a_min.max(1) as u16
 }
 

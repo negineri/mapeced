@@ -32,23 +32,22 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
 
     // 2. キャッシュ読み込み（use_v6plus_static_rules = false かつ cache_file が Some の場合）
     let mut initial_rules: Vec<MapRule> = Vec::new();
-    if !config.use_v6plus_static_rules {
-        if let Some(ref cache_path) = config.map_rules_cache_file {
-            if cache_path.exists() {
-                match std::fs::read_to_string(cache_path) {
-                    Ok(content) => match serde_json::from_str::<Vec<MapRule>>(&content) {
-                        Ok(rules) => {
-                            info!("loaded {} MAP rules from cache", rules.len());
-                            initial_rules = rules;
-                        }
-                        Err(e) => {
-                            warn!("failed to parse cache file: {e}");
-                        }
-                    },
-                    Err(e) => {
-                        warn!("failed to read cache file: {e}");
-                    }
+    if !config.use_v6plus_static_rules
+        && let Some(ref cache_path) = config.map_rules_cache_file
+        && cache_path.exists()
+    {
+        match std::fs::read_to_string(cache_path) {
+            Ok(content) => match serde_json::from_str::<Vec<MapRule>>(&content) {
+                Ok(rules) => {
+                    info!("loaded {} MAP rules from cache", rules.len());
+                    initial_rules = rules;
                 }
+                Err(e) => {
+                    warn!("failed to parse cache file: {e}");
+                }
+            },
+            Err(e) => {
+                warn!("failed to read cache file: {e}");
             }
         }
     }

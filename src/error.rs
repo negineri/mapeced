@@ -13,10 +13,6 @@ pub enum MapEError {
     #[error("EA-bits length and CE prefix length mismatch")]
     InvalidCePrefix,
 
-    /// IA_PD にマッチする MAP Rule が pending_map_rules に存在しない
-    #[error("no MAP rule matches the IA_PD prefix")]
-    NoPrefixMatch,
-
     /// OPTION_S46_BR が省略された
     #[error("OPTION_S46_BR is missing")]
     MissingBrAddress,

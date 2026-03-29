@@ -36,16 +36,13 @@ fn read_lease_prefix(path: &Path) -> Option<(Ipv6Addr, u8)> {
     for line in content.lines() {
         if let Some(value) = line.strip_prefix("PREFIXES=") {
             // Take the first whitespace-separated entry
-            if let Some(first) = value.split_whitespace().next() {
-                if let Some((addr_str, len_str)) = first.split_once('/') {
-                    if let Ok(len) = len_str.parse::<u8>() {
-                        if len <= 64 {
-                            if let Ok(addr) = addr_str.parse::<Ipv6Addr>() {
-                                return Some((addr, len));
-                            }
-                        }
-                    }
-                }
+            if let Some(first) = value.split_whitespace().next()
+                && let Some((addr_str, len_str)) = first.split_once('/')
+                && let Ok(len) = len_str.parse::<u8>()
+                && len <= 64
+                && let Ok(addr) = addr_str.parse::<Ipv6Addr>()
+            {
+                return Some((addr, len));
             }
         }
     }

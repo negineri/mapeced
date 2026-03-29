@@ -1,3 +1,5 @@
+use tracing::info;
+
 use crate::config::Config;
 use crate::error::MapEError;
 use crate::map::rule::MapeParams;
@@ -59,6 +61,7 @@ pub async fn apply(
     tc.apply(&new_params, &config.tunnel_interface).await?;
 
     state.params = Some(new_params);
+    info!("MAP-E configuration applied");
     Ok(())
 }
 
@@ -78,7 +81,7 @@ pub async fn update(
 
     match params_diff(old_params, &new_params) {
         ParamsDiff::NoChange => {
-            // 変化なし: 何もしない
+            info!("MAP-E params unchanged, skipping update");
         }
         ParamsDiff::BrChanged => {
             let tunnel_ifindex = state
@@ -87,6 +90,7 @@ pub async fn update(
             tunnel::update_tunnel_remote(rtnetlink, tunnel_ifindex, new_params.br_ipv6_addr)
                 .await?;
             state.params = Some(new_params);
+            info!("MAP-E BR address updated");
         }
         ParamsDiff::CeIpv6Changed => {
             let old_params = state.params.take().unwrap();
@@ -145,6 +149,7 @@ pub async fn update(
             tc.apply(&new_params, &config.tunnel_interface).await?;
 
             state.params = Some(new_params);
+            info!("MAP-E configuration updated (CE IPv6 changed)");
         }
     }
 
@@ -195,6 +200,7 @@ pub async fn cleanup(
     // トンネル削除
     let _ = tunnel::delete_tunnel(rtnetlink, &config.tunnel_interface).await;
 
+    info!("MAP-E configuration cleaned up");
     Ok(())
 }
 

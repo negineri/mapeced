@@ -61,12 +61,10 @@ pub fn parse_mape_option(payload: &[u8]) -> Result<Option<Vec<MapRule>>, MapEErr
                 rules.push(rule);
             }
             OPTION_S46_BR => {
-                if br_addr.is_none() {
-                    if data.len() >= 16 {
-                        let mut octets = [0u8; 16];
-                        octets.copy_from_slice(&data[..16]);
-                        br_addr = Some(Ipv6Addr::from(octets));
-                    }
+                if br_addr.is_none() && data.len() >= 16 {
+                    let mut octets = [0u8; 16];
+                    octets.copy_from_slice(&data[..16]);
+                    br_addr = Some(Ipv6Addr::from(octets));
                 }
             }
             _ => {}
@@ -130,7 +128,7 @@ fn parse_s46_rule(data: &[u8]) -> Result<MapRule, MapEError> {
     let ipv4_prefix = Ipv4Addr::new(data[3], data[4], data[5], data[6]);
 
     let ipv6_prefix_len = data[7];
-    let ipv6_bytes_needed = (ipv6_prefix_len as usize + 7) / 8;
+    let ipv6_bytes_needed = (ipv6_prefix_len as usize).div_ceil(8);
 
     if data.len() < 8 + ipv6_bytes_needed {
         return Err(MapEError::InvalidConfig(
