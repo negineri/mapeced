@@ -1,54 +1,49 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use tracing::info;
+mod cli;
+mod config;
+mod error;
 
-#[derive(Parser)]
-#[command(name = "mapeced")]
-#[command(about = "A CLI application", long_about = None)]
-#[command(version)]
-struct Cli {
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
+use clap::Parser;
+use tracing::error;
+use tracing_subscriber::EnvFilter;
 
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Run the main task
-    Run {
-        /// Target to process
-        #[arg(short, long)]
-        target: Option<String>,
-    },
-}
+use cli::Cli;
+use config::load_config;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let cli = Cli::parse();
 
-    let level = if cli.verbose { "debug" } else { "info" };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level)),
-        )
-        .init();
+    init_tracing(&cli.log_level);
 
-    match cli.command {
-        Commands::Run { target } => {
-            let target = target.unwrap_or_else(|| "world".to_string());
-            run(&target).await?;
+    let _config = match load_config(&cli.config) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("{e}");
+            std::process::exit(1);
+        }
+    };
+}
+
+fn init_tracing(log_level: &str) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(log_level));
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+        if Path::new("/run/systemd/journal/socket").exists() {
+            let journald = tracing_journald::layer().expect("failed to connect to journald");
+            use tracing_subscriber::prelude::*;
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(journald)
+                .init();
+            return;
         }
     }
 
-    Ok(())
-}
-
-async fn run(target: &str) -> Result<()> {
-    info!("Running with target: {target}");
-    println!("Hello, {target}!");
-    Ok(())
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
