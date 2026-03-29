@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod dhcpv6;
 mod error;
 mod map;
 
