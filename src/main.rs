@@ -4,6 +4,7 @@ mod dhcpv6;
 mod error;
 mod map;
 mod netlink;
+mod nftables;
 
 use clap::Parser;
 use tracing::error;
