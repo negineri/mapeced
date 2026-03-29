@@ -47,7 +47,7 @@ src/
 
 | ステップ | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1-1      | `error.rs` に `MapEError` 定義（thiserror）。定義すべき主要 variant: `ConfigNotFound { path: PathBuf }`, `InvalidConfig(String)`, `InvalidCePrefix`（EA-bits 長と CE prefix 長の不一致）, `NoPrefixMatch`（IA_PD にマッチする MAP Rule が `pending_map_rules` に存在しない場合。`try_compute` が `Err` を返す際に使用）, `MissingBrAddress`（`OPTION_S46_BR` が省略された場合）, `EmptyPortRanges`（`calc_port_ranges` の結果が空の場合の nftables 適用ガード）, `NetlinkError(String)`（Netlink 操作失敗）, `NftError(String)`（nft コマンド実行失敗） |
+| 1-1      | `error.rs` に `MapEError` 定義（thiserror）。定義すべき主要 variant: `ConfigNotFound { path: PathBuf }`, `InvalidConfig(String)`, `InvalidCePrefix`（EA-bits 長と CE prefix 長の不一致）, `NoPrefixMatch`（IA_PD にマッチする MAP Rule が `pending_map_rules` に存在しない場合。`try_compute` が `Err` を返す際に使用）, `MissingBrAddress`（`OPTION_S46_BR` が省略された場合）, `EmptyPortRanges`（`calc_port_ranges` の結果が空の場合の nftables 適用ガード。`a_min > 2^psid_offset - 1` となる極端なパラメータで発生。`lifecycle::apply` が `calc_port_ranges` 呼び出し後に空チェックを行い返す）, `NetlinkError(String)`（Netlink 操作失敗）, `NftError(String)`（nft コマンド実行失敗） |
 | 1-2      | `config.rs` の型定義と serde デシリアライズ（詳細は下記参照）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 1-3      | `cli.rs` の clap Derive 実装。サブコマンドなし。`--config <PATH>`（デフォルト: `/etc/mapeced/config.toml`）と `--log-level <LEVEL>`（デフォルト: `info`）のみ定義する。起動・停止・状態確認は systemctl に委譲する（`systemctl start/stop/status mapeced`）。 |
 | 1-4      | `main.rs` に tokio ランタイム + ロガー初期化（`tracing-subscriber`。`--log-level` 値を反映し、`/run/systemd/journal/socket` が存在する場合は `tracing-journald` を優先し、そうでない場合は stderr に出力）                                                                                                                                                                                                                                                                                                                                              |
@@ -170,7 +170,10 @@ pub fn extract_ea_bits(
 
 /// EA-bits から IPv4 アドレスを導出する
 /// ipv4_suffix = ea_bits >> psid_len
-/// ipv4_addr   = ipv4_prefix | (ipv4_suffix << (32 - prefix4_len))
+/// ipv4_addr   = ipv4_prefix | ipv4_suffix
+/// （`ipv4_prefix` は下位 (32 - prefix4_len) ビットが 0 の u32 表現であり、
+///  `ipv4_suffix` は 0 から 2^(32-prefix4_len)-1 の値なのでそのまま OR するだけでよい。
+///  誤って `<< (32 - prefix4_len)` シフトするとホスト部が上位バイトにずれるため注意）
 pub fn derive_ipv4_addr(
     ea_bits: u32,
     ipv4_prefix: Ipv4Addr,
@@ -183,6 +186,11 @@ pub fn derive_ipv4_addr(
 pub fn derive_psid(ea_bits: u32, psid_len: u8) -> u16;
 
 /// CE の IPv6 アドレスを構成する（RFC 7597 モード）
+///   アドレス全体のレイアウト（`v6plus-spec.md` RFC 7597 Section 5.2 準拠）:
+///   [rule_ipv6_prefix (prefix6_len bits)][EA-bits (ea_len bits)][0x0000 (16 bits)][IPv4 (32 bits)][PSID (16 bits)]
+///   rule_ipv6_prefix の直後に ea_bits を配置する実装:
+///     base = rule_ipv6_prefix | ((ea_bits as u128) << (128 - rule_prefix_len - ea_len))
+///   残り下位 64 ビットがゼロ初期化された IID フィールドに IPv4/PSID を埋め込む。
 ///   IID: [0x0000(16)] [IPv4(32)] [PSID(16)]
 ///   PSID フィールド（16 bit）への配置: RFC 7597 Section 5.2 に従い**右詰め**（`psid` をそのまま下位に配置）。
 ///   `psid_len` は PSID 値が `psid_len` ビット幅に収まることの確認用。IID 構成時のシフト量には使用しない。
@@ -197,6 +205,11 @@ pub fn build_ce_ipv6_rfc(
 ) -> Ipv6Addr;
 
 /// CE の IPv6 アドレスを構成する（v6プラス非公開 Draft モード）
+///   アドレス全体のレイアウト（`v6plus-spec.md` 非公開 Draft 準拠）:
+///   [rule_ipv6_prefix (prefix6_len bits)][EA-bits (ea_len bits)][0x00 (8 bits)][IPv4 (32 bits)][PSID (16 bits)][0x00 (8 bits)]
+///   rule_ipv6_prefix の直後に ea_bits を配置する実装（RFC モードと同一）:
+///     base = rule_ipv6_prefix | ((ea_bits as u128) << (128 - rule_prefix_len - ea_len))
+///   残り下位 64 ビットが IID（`v6plus-spec.md` の擬似コード参照）:
 ///   IID: [0x00(8)] [IPv4(32)] [PSID(16)] [0x00(8)]
 ///   PSID フィールド（16 bit）への配置: v6プラス仕様に従い**左詰め**（`psid << (16 - psid_len)` で上位に詰める）。
 ///   すなわち `v6plus-spec.md` の `psid << (16 - k)` に相当し、`psid_len` がシフト量の計算に使用される。
@@ -255,6 +268,8 @@ pub fn calc_port_ranges(
 ) -> Vec<(u16, u16)>;
 
 /// nftables SNAT 用連続レンジを返す
+/// 注: `psid` は `psid_offset > 0` の場合には**使用されない**（C 空間は PSID 非依存であり、tc pedit が PSID を埋め込む）。
+///     `psid_offset == 0` の場合のみ PORT_START 計算に使用する。
 /// psid_offset > 0 の場合:
 ///   PORT_START = (1 << 15) + (a_min << M)
 ///   PORT_END   = PORT_START + (2^psid_offset - a_min) * 2^M - 1
@@ -529,14 +544,13 @@ pub async fn del_fmr_route(
 table ip mapeced {
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
-        # SNAT: 連続ポートレンジ（PORT_START–PORT_END）を割り当て、tc egress pedit のために fwmark を付与
-        oifname "<tunnel_iface>" ip protocol { tcp, udp } snat to <ce_ipv4>:<port_start>-<port_end> meta mark set 0x1
-        # ICMP も SNAT + fwmark（tc egress で ICMP エラー内包ヘッダを処理するため）
-        oifname "<tunnel_iface>" ip protocol icmp snat to <ce_ipv4> meta mark set 0x1
+        # SNAT: 連続ポートレンジ（PORT_START–PORT_END）を割り当てる
+        # tc egress pedit が u32 フィルタで C 空間ソースポートを直接照合するため fwmark は不要
+        oifname "<tunnel_iface>" ip protocol { tcp, udp } snat to <ce_ipv4>:<port_start>-<port_end>
+        oifname "<tunnel_iface>" ip protocol icmp snat to <ce_ipv4>
     }
     # prerouting チェーンは不要。
-    # 受信方向の MAP-E ポート変換は tc ingress（nftables prerouting より前に実行）が担当するため、
-    # nftables から tc へ fwmark を渡す必要がない。
+    # 受信方向の MAP-E ポート変換は tc ingress（nftables prerouting より前に実行）が担当する。
 }
 ```
 
@@ -559,7 +573,7 @@ table ip mapeced {
 
 これらは `generate_tc_commands` 内でのみ使用する。
 
-ポートレンジ設定後、tc pedit への受け渡しは egress 方向のみ fwmark（`meta mark`）で行う（postrouting → tc egress の順序は保証される）。
+ポートレンジ設定後、egress・ingress ともに `u32` フィルタでポートパターンを直接照合して tc pedit を適用する（nftables postrouting → tc egress の順序は保証されるため、SNAT 後の C 空間ソースポートを egress u32 フィルタで照合できる）。
 
 ```rust
 pub struct NftManager {
@@ -590,9 +604,19 @@ tc コマンド列（`A=4, M=4, psid_offset=4, psid_len=8` の場合の概略）
 ```bash
 # tunnel インターフェースへの egress に qdisc を設定
 tc qdisc add dev <tunnel_iface> handle 1: root prio
-# fwmark == 1 のパケット（nftables postrouting で SNAT 済み）に pedit を適用
-# postrouting → tc egress の順序は保証されるため fwmark フィルタが正しく機能する
-tc filter add dev <tunnel_iface> parent 1: handle 1 fw action pedit ...
+# nftables postrouting → tc egress の順序が保証されるため、SNAT 後の C 空間ソースポートを u32 フィルタで照合できる
+# 各 R 値 r に対する TCP（proto=6）の例（M = 16 - psid_offset - psid_len）:
+#   C 空間マッチ値: (0x8000|(r<<M))、マスク: (0x8000|((2^A-1)<<M))
+#   pedit and_mask = ~(0x8000|((2^A-1)<<M)) & 0xFFFF  （bit15 と R-in-C フィールドをクリア）
+#   pedit or_val   = (r<<(psid_len+M))|(psid<<M)       （R-in-S フィールドと PSID を設定）
+tc filter add dev <tunnel_iface> parent 1: protocol ip u32 \
+    match ip src <ce_ipv4>/32 \
+    match ip protocol 6 0xff \
+    match u16 <(0x8000|(r<<M))> <(0x8000|((2^A-1)<<M))> at nexthdr+0 \
+    action pedit ex munge u16 and <~(0x8000|((2^A-1)<<M))&0xFFFF> or <(r<<(psid_len+M))|(psid<<M)> at nexthdr+0 \
+    action csum ip4h l4
+# UDP（proto=17）も R 値ごとに同様に生成
+# ICMP エラー内包ヘッダ（オフセット 48 bytes）は別途 u32 フィルタで処理（nexthdr+0 → nexthdr+48 に変更）
 ```
 
 **受信方向**（tunnel ingress、ip6tnl デカプセル後の変換）:
@@ -601,7 +625,7 @@ tc qdisc add dev <tunnel_iface> handle ffff: ingress
 # 【重要】tc ingress は nftables prerouting より前に実行されるため、
 # この時点で fwmark は未設定。fw フィルタは使用できない。
 # 代わりに u32 フィルタで宛先 IPv4 アドレス・PSID・R 値を直接照合する。
-# egress 同様、R 値ごとに個別の filter + pedit ルールを生成する（v6plus: R ∈ [1,15] × TCP/UDP = 最大 30 ルール）。
+# R 値ごとに個別の filter + pedit ルールを生成する（v6plus: R ∈ [1,15] × TCP/UDP = 最大 30 ルール）。
 # 各 R 値 r に対する TCP（proto=6）の例:
 tc filter add dev <tunnel_iface> parent ffff: protocol ip u32 \
     match ip dst <ce_ipv4>/32 \
@@ -619,7 +643,7 @@ tc filter add dev <tunnel_iface> parent ffff: protocol ip u32 \
 
 | 方向 | 処理順序 | フィルタ方式 |
 |---|---|---|
-| 送信（egress） | nftables postrouting → tc egress | `fw`（fwmark）フィルタ ✓ |
+| 送信（egress） | nftables postrouting → tc egress | `u32`（C 空間ソースポート直接照合）フィルタ ✓ |
 | 受信（ingress） | tc ingress → nftables prerouting | `u32`（PSID ビット直接照合）フィルタ ✓ |
 
 受信方向の R=0 チェック（禁止ポート範囲の除外）: `u32` フィルタで `r_check_mask` を用いた照合も可能だが、実運用では CE 宛ての R=0 MAP-E ポートへの着信は発生しないため、PSID チェックのみで十分。
@@ -719,6 +743,8 @@ pub async fn apply(
 ) -> Result<(), MapEError>;
 
 /// 差分更新: 変化した項目のみ更新する
+/// 前提条件: `state.params` が `Some` であること。`None`（未適用状態）の場合は呼び出し元（`runner.rs`）が
+///   `lifecycle::apply` を呼び出すこと（`None` → `apply`、`Some` → `update` と分岐する）。
 /// 複数の項目が同時に変化した場合は以下の優先順位で処理する（上位が下位を包含）:
 ///   1. CE IPv6 変化（最優先）→ 旧 IPv6 アドレス削除 + `ensure_tunnel` でトンネル再作成 +
 ///      新 IPv6 アドレス付与。CE IPv4・PSID・ポートセットも連動変化するため
@@ -748,7 +774,7 @@ pub async fn cleanup(
 ) -> Result<(), MapEError>;
 ```
 
-IA_PD プレフィックス受信後、`pending_map_rules` から `try_compute` を呼び出してマッチする最初のルールで `MapeParams` を計算する。マッチしない場合は `warn!` ログを出力して次のイベントを待つ（`MapEError::NoPrefixMatch` をエラーとして扱わない）。
+IA_PD プレフィックス受信後、`pending_map_rules` から `try_compute` を呼び出して `MapeParams` を計算する。ルール選択は RFC 7597 の最長プレフィックスマッチに従い、`prefix6_len` が最大かつ `try_compute` が `Ok` を返すルールを選択する（複数の `prefix6_len` 最大ルールが存在する場合は先頭を使用）。計算成功時は `state.params` の `None`/`Some` に応じて `lifecycle::apply` または `lifecycle::update` に分岐する（`None` → `apply`、`Some` → `update`）。マッチしない場合は `warn!` ログを出力して次のイベントを待つ（`MapEError::NoPrefixMatch` をエラーとして扱わない）。
 
 #### ステップ 6-3 詳細: `daemon/runner.rs`
 
