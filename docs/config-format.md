@@ -20,9 +20,9 @@ upstream_interface = "eth0"
 tunnel_interface = "mape0"
 
 # MAP 設定プロファイル（必須）
-# "v6plus"  : v6プラス対応サービス向け（JPIX 規格）。静的 MAP ルールを使用し、DHCPv6 キャプチャを行わない
-# "ocn_vc"  : OCN バーチャルコネクト向け（JPNE 規格、RFC 7597 準拠）。静的 MAP ルールを使用
-# "dhcpv6"  : DHCPv6 キャプチャモード（RFC 7598 準拠 ISP 向け）
+# "v6plus"  : v6プラス対応サービス向け（JPIX 規格）。静的 MAP ルールを使用し、DHCPv6 キャプチャを行わない。CE IPv6 は Internet Draft 方式で導出
+# "ocn_vc"  : OCN バーチャルコネクト向け（JPNE 規格）。v6プラスと同様に静的ルールを使用し DHCPv6 キャプチャを行わない。CE IPv6 は Internet Draft 方式で導出。ルールデータのみ異なる
+# "dhcpv6"  : DHCPv6 キャプチャモード（RFC 7598 準拠 ISP 向け）。CE IPv6 は RFC 7597 方式で導出
 map_profile = "v6plus"
 
 # ── オプション設定 ────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ map_profile = "v6plus"
 | ---------------------- | ------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `upstream_interface`   | string  | **はい** | なし                        | WAN 側インターフェース名。最大 15 文字、使用可能文字: 英数字・`-`・`_`・`.`                                  |
 | `tunnel_interface`     | string  | **はい** | なし                        | ip6tnl トンネルインターフェース名。最大 15 文字、`upstream_interface` と異なる名前であること                 |
-| `map_profile`          | string  | **はい** | なし                        | MAP 設定プロファイル。`"v6plus"` / `"ocn_vc"` / `"dhcpv6"` のいずれかを指定する                            |
+| `map_profile`          | string  | **はい** | なし                        | MAP 設定プロファイル。`"v6plus"` / `"ocn_vc"` / `"dhcpv6"` のいずれかを指定する。`v6plus` と `ocn_vc` は Internet Draft 方式で CE IPv6 を導出、`dhcpv6` は RFC 7597 方式を使用 |
 | `p_exclude_max`        | integer | いいえ   | 1023                        | 除外ポート上限値                                                                                             |
 | `tunnel_mtu`           | integer | いいえ   | なし（システム依存）        | トンネル MTU（バイト）。1280〜65535 の範囲                                                                   |
 | `pid_file`             | string  | いいえ   | `"/run/mapecd.pid"`         | PID ファイルのパス                                                                                           |
