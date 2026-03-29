@@ -123,7 +123,7 @@ ipv4_addr   = ipv4_prefix | ipv4_suffix
  <-- rule_prefix_len ---->           <-16 pad-> <-- 32 --> <-- 16 -->
 ```
 
-#### v6プラスの実装（非公開 Internet Draft 準拠）
+#### v6プラスの実装（[Internet Draft](https://datatracker.ietf.org/doc/html/draft-ietf-softwire-map-03#section-6) 準拠）
 
 v6プラスではインターフェース識別子のレイアウトが RFC 7597 と異なる。
 先頭パディングが 16 ビットではなく **8 ビット** となり、末尾に **8 ビット** のパディングが追加される。

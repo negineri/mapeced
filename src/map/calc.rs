@@ -74,9 +74,9 @@ pub fn build_ce_ipv6_rfc(
     Ipv6Addr::from(upper | iid)
 }
 
-/// CE の IPv6 アドレスを構成する（v6プラス非公開 Draft モード）。
+/// CE の IPv6 アドレスを構成する（v6プラス Draft モード）。
 ///
-/// アドレス全体のレイアウト（v6plus-spec.md 非公開 Draft 準拠）:
+/// アドレス全体のレイアウト（v6plus-spec.md Draft 準拠）:
 /// `[rule_ipv6_prefix (prefix6_len bits)][EA-bits (ea_len bits)][0x00 (8 bits)][IPv4 (32 bits)][PSID (16 bits)][0x00 (8 bits)]`
 ///
 /// IID: `[0x00(8)] [IPv4(32)] [PSID left-aligned(16)] [0x00(8)]`
