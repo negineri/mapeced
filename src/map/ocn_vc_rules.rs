@@ -1,53 +1,46 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use super::rule::{MapRule, PortParams};
 
-/// `assets/v6plus_rules.json` のトップレベル構造。
-///
-/// `br_addr`・`psid_offset`・`psid_len` を共通フィールドとして持ち、
-/// ルール固有のアドレス情報のみ `rules` 配列に記述する。
+/// `assets/ocn_vc_rules.json` のトップレベル構造。
 #[derive(Deserialize)]
-struct V6PlusRulesFile {
-    br_addr: Ipv6Addr,
+struct OcnVcRulesFile {
+    br_addr: std::net::Ipv6Addr,
     psid_offset: u8,
     psid_len: u8,
     rules: Vec<RuleEntry>,
 }
 
-/// `rules` 配列の各要素。`br_addr` と `port_params` はトップレベルから補完する。
+/// `rules` 配列の各要素。
 #[derive(Deserialize)]
 struct RuleEntry {
-    ipv4_prefix: Ipv4Addr,
+    ipv4_prefix: std::net::Ipv4Addr,
     prefix4_len: u8,
-    ipv6_prefix: Ipv6Addr,
+    ipv6_prefix: std::net::Ipv6Addr,
     prefix6_len: u8,
     ea_len: u8,
     is_fmr: bool,
 }
 
-static RULES_JSON: &str = include_str!("../../assets/v6plus_rules.json");
+static RULES_JSON: &str = include_str!("../../assets/ocn_vc_rules.json");
 
-/// v6プラス向け静的 BMR テーブルを返す。
+/// OCN バーチャルコネクト向け静的 BMR テーブルを返す。
 ///
-/// v6プラスでは MAP ルールは DHCPv6 では配布されず、インターネット上の公開情報を元に
-/// アプリケーションに静的に埋め込む方針をとる（`docs/v6plus-spec.md` 参照）。
-///
-/// ルールは `assets/v6plus_rules.json` にコンパイル時埋め込みされる。
+/// ルールは `assets/ocn_vc_rules.json` にコンパイル時埋め込みされる。
 /// `port_params.psid` はプレースホルダーとして `0` を設定する（実際の PSID は `try_compute` が上書き）。
 ///
 /// # Panics
-/// `assets/v6plus_rules.json` の JSON が不正な場合にパニックする。
-pub fn v6plus_rules() -> &'static [MapRule] {
+/// `assets/ocn_vc_rules.json` の JSON が不正な場合にパニックする。
+pub fn ocn_vc_rules() -> &'static [MapRule] {
     static RULES: OnceLock<Vec<MapRule>> = OnceLock::new();
     RULES.get_or_init(build_rules)
 }
 
 fn build_rules() -> Vec<MapRule> {
-    let file: V6PlusRulesFile =
-        serde_json::from_str(RULES_JSON).expect("assets/v6plus_rules.json is invalid");
+    let file: OcnVcRulesFile =
+        serde_json::from_str(RULES_JSON).expect("assets/ocn_vc_rules.json is invalid");
 
     file.rules
         .into_iter()

@@ -1,0 +1,12 @@
+{
+  "br_addr": "2404:9200:225:100::64",
+  "psid_offset": 4,
+  "psid_len": 8,
+  "rules": [
+    { "ipv4_prefix": "14.8.0.0",  "prefix4_len": 24, "ipv6_prefix": "2400:4050::", "prefix6_len": 32, "ea_len": 16, "is_fmr": true },
+    { "ipv4_prefix": "14.9.0.0",  "prefix4_len": 24, "ipv6_prefix": "2400:4050::", "prefix6_len": 32, "ea_len": 16, "is_fmr": true },
+    { "ipv4_prefix": "14.10.0.0", "prefix4_len": 24, "ipv6_prefix": "2400:4050::", "prefix6_len": 32, "ea_len": 16, "is_fmr": true },
+    { "ipv4_prefix": "14.11.0.0", "prefix4_len": 24, "ipv6_prefix": "2400:4050::", "prefix6_len": 32, "ea_len": 16, "is_fmr": true },
+    { "ipv4_prefix": "14.12.0.0", "prefix4_len": 24, "ipv6_prefix": "2400:4050::", "prefix6_len": 32, "ea_len": 16, "is_fmr": true }
+  ]
+}

@@ -2,10 +2,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::error::MapEError;
-
-fn default_use_v6plus_static_rules() -> bool {
-    true
-}
+use crate::map::static_rules::MapProfile;
 
 fn default_p_exclude_max() -> u16 {
     1023
@@ -19,8 +16,9 @@ pub struct Config {
     pub tunnel_mtu: Option<u32>,
     #[serde(default)]
     pub map_rules_cache_file: Option<PathBuf>,
-    #[serde(default = "default_use_v6plus_static_rules")]
-    pub use_v6plus_static_rules: bool,
+    /// 静的 MAP ルールのプロファイル。必須フィールド。
+    /// DHCPv6 キャプチャモードで動作する場合は `"dhcpv6"` を指定する。
+    pub map_profile: MapProfile,
     #[serde(default = "default_p_exclude_max")]
     pub p_exclude_max: u16,
 }
@@ -95,6 +93,7 @@ pub fn load_config(path: &Path) -> Result<Config, MapEError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::static_rules::MapProfile;
 
     fn parse(toml: &str) -> Result<Config, MapEError> {
         let config: Config =
@@ -111,6 +110,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         )
         .unwrap();
@@ -118,20 +118,58 @@ mod tests {
         assert_eq!(cfg.tunnel_interface, "ip6tnl0");
         assert_eq!(cfg.tunnel_mtu, None);
         assert_eq!(cfg.map_rules_cache_file, None);
-        assert!(cfg.use_v6plus_static_rules);
+        assert_eq!(cfg.map_profile, MapProfile::V6plus);
         assert_eq!(cfg.p_exclude_max, 1023);
     }
 
     #[test]
-    fn test_default_use_v6plus_static_rules_is_true() {
-        let cfg = parse(
+    fn test_missing_map_profile() {
+        let result = parse(
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
             "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_profile_v6plus() {
+        let cfg = parse(
+            r#"
+            upstream_interface = "eth0"
+            tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
+            "#,
         )
         .unwrap();
-        assert!(cfg.use_v6plus_static_rules);
+        assert_eq!(cfg.map_profile, MapProfile::V6plus);
+    }
+
+    #[test]
+    fn test_map_profile_ocn_vc() {
+        let cfg = parse(
+            r#"
+            upstream_interface = "eth0"
+            tunnel_interface = "ip6tnl0"
+            map_profile = "ocn_vc"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.map_profile, MapProfile::OcnVc);
+    }
+
+    #[test]
+    fn test_map_profile_dhcpv6() {
+        let cfg = parse(
+            r#"
+            upstream_interface = "eth0"
+            tunnel_interface = "ip6tnl0"
+            map_profile = "dhcpv6"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.map_profile, MapProfile::Dhcpv6);
     }
 
     #[test]
@@ -140,6 +178,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         )
         .unwrap();
@@ -152,6 +191,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             p_exclude_max = 2047
             "#,
         )
@@ -165,6 +205,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             tunnel_mtu = 1500
             "#,
         )
@@ -178,6 +219,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             tunnel_mtu = 1280
             "#,
         )
@@ -191,6 +233,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             tunnel_mtu = 65535
             "#,
         )
@@ -204,6 +247,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "dhcpv6"
             map_rules_cache_file = "/var/cache/mapeced/rules.json"
             "#,
         )
@@ -215,16 +259,15 @@ mod tests {
     }
 
     #[test]
-    fn test_use_v6plus_static_rules_false() {
-        let cfg = parse(
+    fn test_map_profile_invalid() {
+        let result = parse(
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
-            use_v6plus_static_rules = false
+            map_profile = "unknown_isp"
             "#,
-        )
-        .unwrap();
-        assert!(!cfg.use_v6plus_static_rules);
+        );
+        assert!(result.is_err());
     }
 
     #[test]
@@ -233,6 +276,7 @@ mod tests {
             r#"
             upstream_interface = "eth0.100"
             tunnel_interface = "ip6tnl-1"
+            map_profile = "v6plus"
             "#,
         )
         .unwrap();
@@ -246,6 +290,7 @@ mod tests {
             r#"
             upstream_interface = "eth0123456789ab"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         )
         .unwrap();
@@ -282,6 +327,7 @@ mod tests {
             r#"
             upstream_interface = ""
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -293,6 +339,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = ""
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -304,6 +351,7 @@ mod tests {
             r#"
             upstream_interface = "eth01234567890ab"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -315,6 +363,7 @@ mod tests {
             r#"
             upstream_interface = "eth 0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -326,6 +375,7 @@ mod tests {
             r#"
             upstream_interface = "eth0;rm"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -337,6 +387,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "eth0"
+            map_profile = "v6plus"
             "#,
         );
         assert!(matches!(result, Err(MapEError::InvalidConfig(_))));
@@ -350,6 +401,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             tunnel_mtu = 1279
             "#,
         );
@@ -362,6 +414,7 @@ mod tests {
             r#"
             upstream_interface = "eth0"
             tunnel_interface = "ip6tnl0"
+            map_profile = "v6plus"
             tunnel_mtu = 0
             "#,
         );

@@ -8,7 +8,6 @@ use crate::config::Config;
 use crate::dhcpv6::{capture, lease_watcher};
 use crate::error::MapEError;
 use crate::map::rule::{MapeParams, MapRule};
-use crate::map::v6plus_rules::v6plus_rules;
 use crate::nftables::manager::{NftManager, TcManager};
 
 use super::{lifecycle, state::DaemonState};
@@ -30,9 +29,9 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
     let nft = NftManager::new();
     let tc = TcManager;
 
-    // 2. キャッシュ読み込み（use_v6plus_static_rules = false かつ cache_file が Some の場合）
+    // 2. キャッシュ読み込み（dhcpv6 プロファイル かつ cache_file が Some の場合）
     let mut initial_rules: Vec<MapRule> = Vec::new();
-    if !config.use_v6plus_static_rules
+    if config.map_profile == crate::map::static_rules::MapProfile::Dhcpv6
         && let Some(ref cache_path) = config.map_rules_cache_file
         && cache_path.exists()
     {
@@ -52,10 +51,10 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
         }
     }
 
-    // 3. 静的ルール設定（use_v6plus_static_rules = true の場合）
-    if config.use_v6plus_static_rules {
-        initial_rules = v6plus_rules().to_vec();
-        info!("using {} v6plus static MAP rules", initial_rules.len());
+    // 3. 静的ルール設定（v6plus / ocn_vc プロファイルの場合）
+    if let Some(rules) = config.map_profile.static_rules() {
+        initial_rules = rules.to_vec();
+        info!("using {} static MAP rules (profile: {:?})", initial_rules.len(), config.map_profile);
     }
 
     let mut state = DaemonState {
@@ -74,8 +73,8 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
         }
     });
 
-    // capture タスク（use_v6plus_static_rules = false の場合のみ）
-    let mut capture_rx_opt: Option<mpsc::Receiver<Vec<MapRule>>> = if !config.use_v6plus_static_rules {
+    // capture タスク（dhcpv6 プロファイルの場合のみ）
+    let mut capture_rx_opt: Option<mpsc::Receiver<Vec<MapRule>>> = if config.map_profile.static_rules().is_none() {
         let (capture_tx, capture_rx) = mpsc::channel::<Vec<MapRule>>(16);
         let upstream_for_capture = config.upstream_interface.clone();
         tokio::spawn(async move {
@@ -110,7 +109,7 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
             }
 
             // DHCPv6 capture から MAP Rule 受信
-            // use_v6plus_static_rules = true の場合は capture_rx_opt が None のため
+            // map_profile 指定時は capture_rx_opt が None のため
             // このアームは永遠に select されない
             rules_opt = async {
                 match capture_rx_opt.as_mut() {
@@ -204,7 +203,7 @@ async fn handle_lease_change(
         }
         Some((ce_prefix, ce_prefix_len)) => {
             // MAP Rule 選択と MapeParams 計算
-            let use_v6plus = config.use_v6plus_static_rules;
+            let use_v6plus = config.map_profile.use_v6plus_ce_calc();
             match select_and_compute(&state.pending_map_rules, ce_prefix, ce_prefix_len, config.p_exclude_max, use_v6plus) {
                 Some(new_params) => {
                     info!(
