@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod error;
+mod map;
 
 use clap::Parser;
 use tracing::error;
