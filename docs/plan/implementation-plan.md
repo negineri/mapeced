@@ -13,7 +13,8 @@ src/
 │   ├── mod.rs
 │   ├── rule.rs                # MapRule, PortParams, MapeParams 型定義
 │   ├── calc.rs                # EA-bits / IPv4 / PSID / CE IPv6 計算
-│   └── port_set.rs            # ポートセット計算 Port(R, j) 式
+│   ├── port_set.rs            # ポートセット計算 Port(R, m) 式
+│   └── v6plus_rules.rs        # v6プラス向け静的 BMR テーブル
 │
 ├── dhcpv6/
 │   ├── mod.rs
@@ -48,7 +49,7 @@ src/
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1-1      | `error.rs` に `MapEError` 定義（thiserror）。定義すべき主要 variant: `ConfigNotFound { path: PathBuf }`, `InvalidConfig(String)`, `InvalidCePrefix`（EA-bits 長と CE prefix 長の不一致）, `NoPrefixMatch`（IA_PD にマッチする MAP Rule が `pending_map_rules` に存在しない場合。`try_compute` が `Err` を返す際に使用）, `MissingBrAddress`（`OPTION_S46_BR` が省略された場合）, `EmptyPortRanges`（`calc_port_ranges` の結果が空の場合の nftables 適用ガード）, `NetlinkError(String)`（Netlink 操作失敗）, `NftError(String)`（nft コマンド実行失敗） |
 | 1-2      | `config.rs` の型定義と serde デシリアライズ（詳細は下記参照）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 1-3      | `cli.rs` の clap Derive 実装。`--config <PATH>`（デフォルト: `/etc/mapeced/config.toml`）と `--log-level <LEVEL>`（デフォルト: `info`）をグローバルオプションとして追加                                                                                                                                                                                                                                                                                                                                                                                 |
+| 1-3      | `cli.rs` の clap Derive 実装。`--config <PATH>`（デフォルト: `/etc/mapeced/config.toml`）と `--log-level <LEVEL>`（デフォルト: `info`）をグローバルオプションとして追加。サブコマンドのシグネチャのみ定義する（`start` / `status` / `stop`）。`status` と `stop` の実体は Phase 6（ステップ 6-4）で実装する。`status`: `pid_file` を読んでプロセスが生存中か確認し結果を表示。`stop`: `pid_file` を読んで SIGTERM を送信。 |
 | 1-4      | `main.rs` に tokio ランタイム + ロガー初期化（`tracing-subscriber`。`--log-level` 値を反映し、`/run/systemd/journal/socket` が存在する場合は `tracing-journald` を優先し、そうでない場合は stderr に出力）                                                                                                                                                                                                                                                                                                                                              |
 
 テスト: `config.rs` のフィールドごとにデシリアライズ単体テスト。デフォルト値・必須バリデーションの確認。
@@ -67,6 +68,24 @@ src/
 - 両フィールドが英数字・`-`・`_`・`.` のみで構成されていること（スペース・クォート・バックスラッシュ・セミコロン等は不許可。`generate_ruleset` での文字列インジェクションを設定読み込み段階で防ぐ）
 - `upstream_interface` と `tunnel_interface` が異なる名前であること（WAN インターフェースと ip6tnl トンネルに同一インターフェースは使用不可）
 - `tunnel_mtu` が `Some(v)` の場合、`v` が 1280 以上（IPv6 最小 MTU）かつ 65535 以下であること（0 や極小値を防ぐ。`v < 1280` の場合は `MapEError::InvalidConfig` を返す）
+
+**`Config` の全フィールド一覧**（TOML キー名 = フィールド名）:
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `upstream_interface` | `String` | 必須 | WAN 側インターフェース名 |
+| `tunnel_interface` | `String` | 必須 | ip6tnl トンネル名 |
+| `tunnel_mtu` | `Option<u32>` | `None`（設定しない） | トンネル MTU（1280–65535） |
+| `pid_file` | `PathBuf` | `/run/mapeced.pid` | PID ファイルパス |
+| `map_rules_cache_file` | `Option<PathBuf>` | `None`（キャッシュなし） | MAP ルールキャッシュ JSON パス |
+| `use_v6plus_static_rules` | `bool` | `true` | `true` の場合 v6プラス静的 BMR を使用し DHCPv6 capture からのルール更新を無視する |
+| `p_exclude_max` | `u16` | `1023` | 除外するポート上限（inclusive）。0–1023 は Well-Known Ports |
+
+**`use_v6plus_static_rules` と `use_v6plus` IID 方式の関係**:
+
+- `use_v6plus_static_rules = true` のとき: `try_compute` の `use_v6plus` 引数は `true`（`build_ce_ipv6_v6plus` を使用）
+- `use_v6plus_static_rules = false` のとき: `try_compute` の `use_v6plus` 引数は `false`（RFC 7597 標準の `build_ce_ipv6_rfc` を使用）
+- すなわち `use_v6plus` は `Config` フィールドとしては持たず、`use_v6plus_static_rules` から導出する
 
 ### Phase 2: MAP-E 純粋計算ロジック（優先度最高・Linux 不要）
 
@@ -92,6 +111,7 @@ pub struct MapRule {
     pub ea_len: u8,              // EA-bits 長
     pub port_params: PortParams, // PSID パラメータ
     pub br_addr: Ipv6Addr,       // BR の IPv6 アドレス
+    pub is_fmr: bool,            // FMR フラグ（RFC 7598 OPTION_S46_RULE flags bit0）
 }
 
 pub struct PortParams {
@@ -114,7 +134,7 @@ pub struct MapeParams {
 }
 ```
 
-`MapRule` に `try_compute(ce_prefix: Ipv6Addr, ce_prefix_len: u8, p_exclude_max: u16, use_v6plus: bool) -> Result<MapeParams, MapEError>` メソッドを実装する。`ce_prefix_len < rule.prefix6_len + rule.ea_len` の場合は `MapEError::InvalidCePrefix` を返す。
+`MapRule` に `try_compute(ce_prefix: Ipv6Addr, ce_prefix_len: u8, p_exclude_max: u16, use_v6plus: bool) -> Result<MapeParams, MapEError>` メソッドを実装する。`ce_prefix_len < rule.prefix6_len + rule.ea_len` の場合は `MapEError::InvalidCePrefix` を返す。`p_exclude_max` は `Config::p_exclude_max`（デフォルト 1023）を渡す。`use_v6plus` は `Config::use_v6plus_static_rules` と同値とする（上記「`use_v6plus_static_rules` と `use_v6plus` IID 方式の関係」参照）。
 
 v6プラス向け静的ルールテーブルは `map/v6plus_rules.rs` に定義し、`pub fn v6plus_rules() -> &'static [MapRule]` として公開する。`map/rule.rs` からは re-export する。静的ルールは `Mutex` や `OnceLock` で初期化する。
 
@@ -242,12 +262,14 @@ OPTION_S46_CONT_MAPE (code 94)
        ├─ ipv4-prefix (4 bytes)
        ├─ ipv6-prefix-len (1 byte)
        ├─ ipv6-prefix (可変: ceil(ipv6-prefix-len/8) bytes)
-       └─ OPTION_S46_PORTPARAMS (code 93)
+       └─ OPTION_S46_PORTPARAMS (code 93)  ← オプション。省略可能
             ├─ offset (4 bits upper)
             ├─ psid-len (4 bits lower)
             └─ psid (2 bytes)
   └─ OPTION_S46_BR (code 90)  ← 16 bytes
 ```
+
+`OPTION_S46_PORTPARAMS` が省略された場合は `psid_offset = 0, psid_len = 0, psid = 0` をデフォルト値として使用する（連続ポート割り当て、tc 変換不要）。
 
 実装上の注意:
 - `OPTION_S46_BR` が存在しない場合は `MapEError::MissingBrAddress` を返す
@@ -369,7 +391,7 @@ pub async fn delete_tunnel(
     name: &str,
 ) -> Result<(), MapEError>;
 
-/// トンネルが既に存在する場合は削除して再作成する（冪等性のため）
+/// トンネルが既に存在する場合は削除して再作成する（初回 apply・CE IPv6 変化時に使用）
 pub async fn ensure_tunnel(
     handle: &rtnetlink::Handle,
     name: &str,
@@ -378,6 +400,14 @@ pub async fn ensure_tunnel(
     link_ifindex: u32,
     mtu: Option<u32>,
 ) -> Result<u32, MapEError>;
+
+/// BR アドレス（remote エンドポイント）のみを RTM_NEWLINK + NLM_F_REPLACE で in-place 更新する
+/// トンネルを再作成せずに済むため、BR 変化時の通信断を最小化する
+pub async fn update_tunnel_remote(
+    handle: &rtnetlink::Handle,
+    ifindex: u32,
+    new_remote: Ipv6Addr,
+) -> Result<(), MapEError>;
 ```
 
 #### ステップ 4-3 詳細: `netlink/route.rs`
@@ -441,10 +471,10 @@ table ip mapeced {
     }
     chain prerouting {
         type filter hook prerouting priority dstnat; policy accept;
-        # 戻りパケット識別: PSID マッチで fwmark を付与
-        # (p >> psid_offset) & psid_mask == psid && (p >> (psid_len + psid_offset)) != 0
+        # 戻りパケット識別: PSID マッチ && R != 0 で fwmark を付与
         ip daddr <ce_ipv4> ip protocol { tcp, udp } \
             th dport & <psid_check_mask> == <psid_val> \
+            th dport & <r_check_mask> != 0 \
             meta mark set 0x1
         ip daddr <ce_ipv4> ip protocol icmp meta mark set 0x1
     }
@@ -455,9 +485,10 @@ table ip mapeced {
 }
 ```
 
-`psid_check_mask` および `psid_val` は `port_set.rs` の計算結果から生成する:
-- `psid_check_mask = ((1 << psid_len) - 1) << psid_offset`
-- `psid_val = psid << psid_offset`
+`psid_check_mask`・`psid_val`・`r_check_mask` は `port_set.rs` の計算結果から生成する。ここで `M = 16 - psid_offset - psid_len`:
+- `psid_check_mask = ((1 << psid_len) - 1) << M`
+- `psid_val = psid << M`
+- `r_check_mask = ((1 << psid_offset) - 1) << (psid_len + M)`  （R フィールドのビットマスク。これが 0 のポートは予約ポート範囲）
 
 ポートレンジ設定後、tc pedit への受け渡しは fwmark（`meta mark`）で行う。
 
@@ -567,9 +598,9 @@ pub async fn apply(
 ) -> Result<(), MapEError>;
 
 /// 差分更新: 変化した項目のみ更新する
-/// - BR アドレス変化のみ → トンネル remote エンドポイントのみ更新
+/// - BR アドレス変化のみ → `update_tunnel_remote` で remote エンドポイントを in-place 更新
 /// - PSID 変化 → nftables + tc を再適用
-/// - CE IPv6 変化 → アドレス差し替え + トンネル再作成
+/// - CE IPv6 変化 → アドレス差し替え + `ensure_tunnel` でトンネル再作成
 /// - 変化なし → 何もしない
 pub async fn update(
     state: &mut DaemonState,
@@ -619,12 +650,14 @@ lifecycle::cleanup(&mut state, ...).await?;
 ```
 
 起動時シーケンス:
-1. PID ファイル書き込み（`pid_file` パス）
+1. PID ファイル書き込み（`config.pid_file` パス）
 2. WAN ifindex を `if_nametoindex` で取得
-3. MAP ルールキャッシュファイルが存在すれば読み込んで `pending_map_rules` に設定
-4. `use_v6plus_static_rules = true` の場合は v6plus_rules を `pending_map_rules` に設定（キャッシュより優先）
+3. MAP ルールキャッシュファイルが存在すれば読み込んで `pending_map_rules` に設定（`config.map_rules_cache_file` が `Some` の場合のみ）
+4. `config.use_v6plus_static_rules = true` の場合は v6plus_rules を `pending_map_rules` に設定（キャッシュより優先）
 5. `lease_watcher` と `dhcpv6::capture` を tokio タスクとして spawn
-6. 既存の MAP-E 由来 Netlink 設定を検出してクリーンアップ（再起動時の冪等性確保）
+6. 既存の MAP-E 由来設定をクリーンアップ（再起動時の冪等性確保）:
+   - `nft delete table ip mapeced` を実行（存在しない場合はエラーを無視）
+   - `if_nametoindex(config.tunnel_interface)` で既存トンネルを確認し、存在する場合は tc qdisc を削除した後にトンネルインターフェースを削除する
 7. イベントループ開始
 
 終了時シーケンス（SIGTERM / SIGINT 受信後）:
