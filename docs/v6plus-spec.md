@@ -32,7 +32,7 @@ v6プラスでは RFC 7598 で定義された DHCPv6 オプション（`OPTION_S
 JPIX が運営する専用サーバーから HTTP で取得する方式が採用されているが、このサーバーへのアクセスには別途契約が必要である。
 
 そのため、本実装では インターネット上の公開情報に基づき MAP ルールをアプリケーションに静的に埋め込む方針とする。
-静的ルールは `assets/v6plus_rules.json` に格納されており、設定ファイルで `map_profile = "v6plus"` を指定することで使用される。
+静的ルールは `assets/static_rules.json` に格納されており、設定ファイルで `static_rule = true` および `ce_calc = "draft"` を指定することで使用される。
 
 ### 静的埋め込みが必要な情報
 
@@ -255,7 +255,7 @@ MSS クランプも併せて設定することが望ましい。
 
 ### MAP ルールの管理
 
-v6プラスの MAP ルールはアプリケーションに静的に埋め込まれている（`assets/v6plus_rules.json`）。
+v6プラスの MAP ルールはアプリケーションに静的に埋め込まれている（`assets/static_rules.json`）。
 IA_PD で委任された IPv6 プレフィックスが取得できれば、埋め込みルールを用いてすべてのパラメータを計算できる。
 
 - mapecd は `/run/systemd/netif/leases/<ifindex>` の変化を監視して IA_PD プレフィックスの更新を検知する

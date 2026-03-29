@@ -19,11 +19,15 @@ upstream_interface = "eth0"
 # MAP-E トンネルインターフェース名（必須）
 tunnel_interface = "mape0"
 
-# MAP 設定プロファイル（必須）
-# "v6plus"  : v6プラス対応サービス向け（JPIX 規格）。静的 MAP ルールを使用し、DHCPv6 キャプチャを行わない。CE IPv6 は Internet Draft 方式で導出
-# "ocn_vc"  : OCN バーチャルコネクト向け（JPNE 規格）。v6プラスと同様に静的ルールを使用し DHCPv6 キャプチャを行わない。CE IPv6 は Internet Draft 方式で導出。ルールデータのみ異なる
-# "dhcpv6"  : DHCPv6 キャプチャモード（RFC 7598 準拠 ISP 向け）。CE IPv6 は RFC 7597 方式で導出
-map_profile = "v6plus"
+# 静的 MAP ルールを使用するか（デフォルト: false）
+# true  : assets/static_rules.json の埋め込みルールを使用する（v6プラス・OCN VC 等）
+# false : DHCPv6 キャプチャでルールを取得する（RFC 7598 準拠 ISP）
+# static_rule = false
+
+# CE IPv6 アドレスの計算方式（デフォルト: "rfc7597"）
+# "rfc7597" : RFC 7597 標準方式
+# "draft"   : Internet Draft 方式（v6プラス・OCN VC 等）
+# ce_calc = "rfc7597"
 
 # ── オプション設定 ────────────────────────────────────────────────────────
 
@@ -45,7 +49,7 @@ map_profile = "v6plus"
 # pid_file = "/run/mapecd.pid"
 
 # MAP ルールキャッシュファイルのパス（JSON 形式）
-# dhcpv6 プロファイル使用時に有効
+# static_rule = false（DHCPv6 モード）使用時に有効
 # デフォルト: "/run/mapecd/rules.cache"
 # map_rules_cache_file = "/run/mapecd/rules.cache"
 
@@ -62,11 +66,12 @@ map_profile = "v6plus"
 | ---------------------- | ------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `upstream_interface`   | string  | **はい** | なし                        | WAN 側インターフェース名。最大 15 文字、使用可能文字: 英数字・`-`・`_`・`.`                                  |
 | `tunnel_interface`     | string  | **はい** | なし                        | ip6tnl トンネルインターフェース名。最大 15 文字、`upstream_interface` と異なる名前であること                 |
-| `map_profile`          | string  | **はい** | なし                        | MAP 設定プロファイル。`"v6plus"` / `"ocn_vc"` / `"dhcpv6"` のいずれかを指定する。`v6plus` と `ocn_vc` は Internet Draft 方式で CE IPv6 を導出、`dhcpv6` は RFC 7597 方式を使用 |
+| `static_rule`          | bool    | いいえ   | `false`                     | `true` のとき `assets/static_rules.json` の埋め込みルールを使用する。`false` のとき DHCPv6 キャプチャを使用 |
+| `ce_calc`              | string  | いいえ   | `"rfc7597"`                 | CE IPv6 アドレスの計算方式。`"rfc7597"` または `"draft"`（Internet Draft 方式）                              |
 | `p_exclude_max`        | integer | いいえ   | 1023                        | 除外ポート上限値                                                                                             |
 | `tunnel_mtu`           | integer | いいえ   | なし（システム依存）        | トンネル MTU（バイト）。1280〜65535 の範囲                                                                   |
 | `pid_file`             | string  | いいえ   | `"/run/mapecd.pid"`         | PID ファイルのパス                                                                                           |
-| `map_rules_cache_file` | string  | いいえ   | `"/run/mapecd/rules.cache"` | MAP ルールキャッシュファイルのパス。`map_profile = "dhcpv6"` 使用時に有効                                   |
+| `map_rules_cache_file` | string  | いいえ   | `"/run/mapecd/rules.cache"` | MAP ルールキャッシュファイルのパス。`static_rule = false`（DHCPv6 モード）使用時に有効                       |
 | `duid_file`            | string  | いいえ   | `"/var/lib/mapecd/duid"`    | DHCPv6 DUID ファイルのパス                                                                                   |
 
 ---
@@ -89,8 +94,8 @@ map_profile = "v6plus"
 ログレベルは設定ファイルではなく CLI の `--log-level` オプションで指定する。
 
 ```bash
-mapecd --log-level debug start
-mapecd --log-level "mapecd=debug,warn" start
+mapeced --log-level debug start
+mapeced --log-level "mapeced=debug,warn" start
 ```
 
 デフォルトは `"info"`。tracing の directive 構文（`クレート=レベル` 形式）も使用できる。
@@ -99,12 +104,9 @@ mapecd --log-level "mapecd=debug,warn" start
 
 ## 最小構成例
 
-`map_profile` は必須フィールドです。
-
 ```toml
 upstream_interface = "eth0"
 tunnel_interface   = "mape0"
-map_profile        = "v6plus"
 ```
 
 ---
@@ -114,7 +116,8 @@ map_profile        = "v6plus"
 ```toml
 upstream_interface = "eth0"
 tunnel_interface   = "mape0"
-map_profile        = "v6plus"
+static_rule        = true
+ce_calc            = "draft"
 tunnel_mtu         = 1460
 ```
 
@@ -125,7 +128,8 @@ tunnel_mtu         = 1460
 ```toml
 upstream_interface = "eth0"
 tunnel_interface   = "mape0"
-map_profile        = "ocn_vc"
+static_rule        = true
+ce_calc            = "draft"
 tunnel_mtu         = 1460
 ```
 
@@ -136,6 +140,5 @@ tunnel_mtu         = 1460
 ```toml
 upstream_interface      = "eth0"
 tunnel_interface        = "mape0"
-map_profile             = "dhcpv6"
 map_rules_cache_file    = "/run/mapecd/rules.cache"
 ```

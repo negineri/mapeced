@@ -116,7 +116,6 @@ mapeced status
 ```toml
 upstream_interface = "eth0"
 tunnel_interface   = "mape0"
-map_profile        = "v6plus"
 ```
 
 v6プラス向け典型的な設定:
@@ -124,7 +123,8 @@ v6プラス向け典型的な設定:
 ```toml
 upstream_interface = "eth0"
 tunnel_interface   = "mape0"
-map_profile        = "v6plus"
+static_rule        = true
+ce_calc            = "draft"
 tunnel_mtu         = 1460
 ```
 
@@ -188,8 +188,8 @@ mapeced --log-level "mapeced=debug,warn" start
 ## v6プラス対応
 
 v6プラスでは DHCPv6 で MAP ルールが配信されません。
-`map_profile = "v6plus"` を設定すると、組み込みの静的 MAP ルールテーブルを使用します。
-静的ルールは `assets/v6plus_rules.json` に格納されており、`tools/gen_v6plus_rules.py` で更新できます。
+`static_rule = true` および `ce_calc = "draft"` を設定すると、組み込みの静的 MAP ルールテーブルを使用します。
+静的ルールは `assets/static_rules.json` に格納されています。
 
 詳細は [docs/v6plus-spec.md](docs/v6plus-spec.md) を参照してください。
 
