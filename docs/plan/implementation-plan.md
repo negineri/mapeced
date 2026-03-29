@@ -197,21 +197,30 @@ pub fn build_ce_ipv6_v6plus(
 [ R (psid_offset bits) ][ PSID (psid_len bits) ][ m (M bits) ]
 ```
 
-- `M`（大文字）: 下位フィールドのビット幅 = `16 - psid_offset - psid_len`。v6プラスでは `16 - 4 - 8 = 4`。
-- `m`（小文字）: 下位フィールドの実際のインデックス値（= `j`）、範囲は `[0, 2^M - 1]`。
+変数の対応（`docs/mape-port-allocation.md` との対応）:
 
-`M` は各関数内部で `let m_bits = 16u8 - psid_offset - psid_len;` として計算する（引数には含まない）。
+| 本計画の変数名 | ドキュメント記法 | 意味 |
+|---|---|---|
+| `psid_offset` | `A` | R フィールドのビット幅（上位） |
+| `psid_len` | `PSID_LEN` | PSID フィールドのビット幅 |
+| `M` | `M` | 下位フィールドのビット幅 = `16 - A - PSID_LEN` |
+| `R`（ポート式中の変数） | `a` | R フィールドの値。範囲 `[a_min, 2^A - 1]` |
+| `m`（ポート式中の変数） | `j` | 下位フィールドの値。範囲 `[0, 2^M - 1]` |
+
+`M` は各関数内部で `let m_bits = 16u8.checked_sub(psid_offset + psid_len).expect("psid_offset + psid_len must be < 16");` として計算する（引数には含まない）。`psid_offset + psid_len >= 16`（M ≤ 0）は不正な入力であり、`calc_a_min` 呼び出し前に `config.rs` のバリデーションで弾く（後述）。
 
 ```rust
 /// a_min を算出する
 /// a_min = max(1, ceil((p_exclude_max + 1) / 2^(psid_len + M)))
 /// ただし M = 16 - psid_offset - psid_len
+/// 前提: psid_offset + psid_len < 16
 pub fn calc_a_min(psid_offset: u8, psid_len: u8, p_exclude_max: u16) -> u16;
 
 /// 利用可能なポートレンジ一覧を返す
-/// Port(R, m) = R * 2^(psid_len + M) + psid * 2^M + m
+/// Port(R, m) = (R << (psid_len + M)) + (psid << M) + m
 /// R ∈ [a_min, 2^psid_offset - 1], m ∈ [0, 2^M - 1]
 /// ただし M = 16 - psid_offset - psid_len
+/// 前提: psid_offset + psid_len < 16
 pub fn calc_port_ranges(
     psid_offset: u8,
     psid_len: u8,
@@ -220,9 +229,10 @@ pub fn calc_port_ranges(
 ) -> Vec<(u16, u16)>;
 
 /// nftables SNAT 用連続レンジを返す
-/// PORT_START = (1 << 15) | (a_min << M)
+/// PORT_START = (1 << 15) + (a_min << M)
 /// PORT_END   = PORT_START + (2^psid_offset - a_min) * 2^M - 1
 /// ただし M = 16 - psid_offset - psid_len
+/// 前提: psid_offset + psid_len < 16
 pub fn calc_continuous_range(
     psid_offset: u8,
     psid_len: u8,
@@ -230,7 +240,11 @@ pub fn calc_continuous_range(
 ) -> (u16, u16);
 ```
 
-`psid_offset == 0` の場合（連続ポート）は tc 変換不要の特殊ケースとして `calc_port_ranges` は `vec![(0, 65535)]`、`calc_continuous_range` は `(0, 65535)` を返す。
+`psid_offset == 0` の場合（RFC 定義の連続ポート）は tc 変換不要の特殊ケースとして `calc_port_ranges` は `vec![(0, 65535)]`、`calc_continuous_range` は `(0, 65535)` を返す。このとき `psid_len` も 0 になるため `psid_offset + psid_len < 16` は自明に満たされる。
+
+**`config.rs` バリデーション追加**（`OPTION_S46_PORTPARAMS` を設定ファイルで指定する場合を含む）:
+- `psid_offset + psid_len < 16` を満たさない場合は `MapEError::InvalidConfig` を返す（M > 0 が必須）
+- この条件は DHCPv6 パーサー（`parser.rs`）でも同様にバリデーションし、違反時は `MapEError::InvalidConfig` を返す
 
 ---
 
@@ -530,10 +544,24 @@ tc qdisc add dev <tunnel_iface> handle ffff: ingress
 tc filter add dev <tunnel_iface> parent ffff: handle 1 fw action pedit ...
 ```
 
-tc pedit のビット変換ロジック（送信方向の例）。ここでの `M` はポート下位フィールドのビット幅 `M = 16 - psid_offset - psid_len`（v6プラスは 4）を指す:
-- ポート番号の bit[15] が立っている（連続レンジの印）→ `R` のビットを上位に展開し、`psid` を `bit[M+psid_len-1:M]` に埋め込む
-- TCP/UDP の場合はチェックサムを再計算（`munge offset 16 u16 invert` は不十分なため pedit の `adjust` を使用する）
-- ICMP エラーに内包される TCP/UDP ヘッダーにも適用（オフセット 48 bytes）
+tc pedit のビット変換ロジック（`docs/mape-port-allocation.md` 準拠）。ここでの `M` はポート下位フィールドのビット幅 `M = 16 - psid_offset - psid_len`（v6プラスは 4）を指す。
+
+**送信方向（連続レンジ C → MAP-E ポート集合 S）**:
+1. `R`（= a）の MSB が立っていない場合は `0x8000` ビットを下ろす（PORT_START の MSB=1 をクリア）
+2. 残りの `R` フィールドのビットを確認し、立っているものを対応する上位ビット（`bit[M+psid_len+R_bit_pos]`）に展開する
+3. `psid` を `bit[M+psid_len-1 : M]` に埋め込む
+4. TCP/UDP のチェックサムを再計算
+
+**受信方向（MAP-E ポート集合 S → 連続レンジ C）**:
+1. `psid` フィールドでフィルタし、対象フローに `fwmark` を付与（nftables で実施済み）
+2. `psid` 部分（`bit[M+psid_len-1:M]`）を 0 で埋める（`R` のビットが入ってくる位置を空ける）
+3. `R` フィールドのビットを全て確認し、対応する下位ビットを展開する
+4. 最上位ビット（`0x8000`）を立てる（連続レンジ C の印に戻す）
+5. TCP/UDP のチェックサムを再計算
+
+上記の変換は C と S の間で完全な 1 対 1 対応（全単射）になる。
+
+TCP/UDP に加え、ICMP エラーパケットに内包される TCP/UDP ヘッダー（オフセット 48 bytes: IPv4(20) + ICMP(8) + 内包 IPv4(20)）にも適用する。ただし IPv4 オプション（固定 20 バイトを前提）がある場合は対象外。
 
 ```rust
 pub struct TcManager;
