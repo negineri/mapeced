@@ -3,6 +3,7 @@ mod config;
 mod dhcpv6;
 mod error;
 mod map;
+mod netlink;
 
 use clap::Parser;
 use tracing::error;

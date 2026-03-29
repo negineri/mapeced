@@ -21,3 +21,6 @@ tempfile = "3"
 tracing-journald = "0.3"
 nix = { version = "0.29", features = ["socket", "net", "inotify"] }
 libc = "0.2"
+rtnetlink = "0.14"
+netlink-packet-route = "0.19"
+futures = "0.3"
