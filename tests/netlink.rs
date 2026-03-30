@@ -39,6 +39,7 @@ fn remote() -> Ipv6Addr {
 /// tnl_01: ensure_tunnel() — 新規作成でインターフェースが出現する。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_01_ensure_tunnel_creates_interface() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -56,6 +57,7 @@ async fn tnl_01_ensure_tunnel_creates_interface() {
 /// tnl_02: ensure_tunnel() — 冪等性。同一パラメータで 2 回呼んでもエラーにならない。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_02_ensure_tunnel_is_idempotent() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -77,6 +79,7 @@ async fn tnl_02_ensure_tunnel_is_idempotent() {
 /// tnl_03: ensure_tunnel() — パラメータ更新。local IPv6 を変えて再呼び出し後もインターフェースが存在する。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_03_ensure_tunnel_updates_params() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -99,6 +102,7 @@ async fn tnl_03_ensure_tunnel_updates_params() {
 /// tnl_04: ensure_tunnel() — MTU 設定が反映される。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_04_ensure_tunnel_sets_mtu() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -114,6 +118,7 @@ async fn tnl_04_ensure_tunnel_sets_mtu() {
 /// tnl_05: delete_tunnel() — インターフェースが削除される。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_05_delete_tunnel_removes_interface() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -136,6 +141,7 @@ async fn tnl_05_delete_tunnel_removes_interface() {
 /// tnl_06: 存在しないトンネルを削除しても成功（冪等）。
 #[tokio::test(flavor = "current_thread")]
 async fn tnl_06_delete_nonexistent_tunnel_is_ok() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -150,6 +156,7 @@ async fn tnl_06_delete_nonexistent_tunnel_is_ok() {
 /// addr_01: add_ipv6_addr() — WAN インターフェース（lo）に IPv6 アドレスが付与される。
 #[tokio::test(flavor = "current_thread")]
 async fn addr_01_add_ipv6_addr_to_wan() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -168,6 +175,7 @@ async fn addr_01_add_ipv6_addr_to_wan() {
 /// addr_02: add_ipv4_addr() — トンネルインターフェースに IPv4 アドレスが付与される。
 #[tokio::test(flavor = "current_thread")]
 async fn addr_02_add_ipv4_addr_to_tunnel() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -190,6 +198,7 @@ async fn addr_02_add_ipv4_addr_to_tunnel() {
 /// addr_03: 同一アドレスの重複付与でエラーにならず、アドレスが存在する（冪等）。
 #[tokio::test(flavor = "current_thread")]
 async fn addr_03_duplicate_add_is_idempotent() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -211,6 +220,7 @@ async fn addr_03_duplicate_add_is_idempotent() {
 /// addr_04: del_addr() — アドレス削除後に存在しない。
 #[tokio::test(flavor = "current_thread")]
 async fn addr_04_del_addr_removes_address() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -236,6 +246,7 @@ async fn addr_04_del_addr_removes_address() {
 /// rt_01: add_default_route() — 0.0.0.0/0 ルートがトンネル経由で設定される。
 #[tokio::test(flavor = "current_thread")]
 async fn rt_01_add_default_route() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -257,6 +268,7 @@ async fn rt_01_add_default_route() {
 /// rt_02: add_fmr_route() — FMR プレフィックスのルートが追加される。
 #[tokio::test(flavor = "current_thread")]
 async fn rt_02_add_fmr_route() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -265,7 +277,7 @@ async fn rt_02_add_fmr_route() {
         .await
         .expect("ensure_tunnel failed");
 
-    let fmr_prefix = Ipv4Addr::new(106, 73, 0, 0);
+    let fmr_prefix = Ipv4Addr::new(106, 72, 0, 0);
     let fmr_len = 15u8;
     route::add_fmr_route(&handle, fmr_prefix, fmr_len, tnl_ifindex)
         .await
@@ -280,6 +292,7 @@ async fn rt_02_add_fmr_route() {
 /// rt_03: del_default_route() / del_fmr_route() — 削除後にルートが消える。
 #[tokio::test(flavor = "current_thread")]
 async fn rt_03_del_routes() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -289,7 +302,7 @@ async fn rt_03_del_routes() {
         .expect("ensure_tunnel failed");
 
     // ルート追加
-    let fmr_prefix = Ipv4Addr::new(106, 73, 0, 0);
+    let fmr_prefix = Ipv4Addr::new(106, 72, 0, 0);
     let fmr_len = 15u8;
     route::add_default_route(&handle, tnl_ifindex).await.expect("add_default_route failed");
     route::add_fmr_route(&handle, fmr_prefix, fmr_len, tnl_ifindex)
@@ -323,6 +336,7 @@ async fn rt_03_del_routes() {
 /// rt_04: 同一ルートの重複追加でエラーにならず、ルートが存在する（冪等）。
 #[tokio::test(flavor = "current_thread")]
 async fn rt_04_duplicate_add_route_is_idempotent() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);

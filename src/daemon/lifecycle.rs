@@ -83,6 +83,34 @@ pub async fn update(
         ParamsDiff::NoChange => {
             info!("MAP-E params unchanged, skipping update");
         }
+        ParamsDiff::FmrChanged => {
+            let tunnel_ifindex = state
+                .tunnel_ifindex
+                .expect("tunnel_ifindex should be set when params is Some");
+            let old_params = state.params.as_ref().unwrap();
+            // 古い FMR ルートを削除
+            if old_params.is_fmr {
+                let _ = route::del_fmr_route(
+                    rtnetlink,
+                    old_params.fmr_ipv4_prefix,
+                    old_params.fmr_prefix4_len,
+                    tunnel_ifindex,
+                )
+                .await;
+            }
+            // 新しい FMR ルートを追加
+            if new_params.is_fmr {
+                route::add_fmr_route(
+                    rtnetlink,
+                    new_params.fmr_ipv4_prefix,
+                    new_params.fmr_prefix4_len,
+                    tunnel_ifindex,
+                )
+                .await?;
+            }
+            state.params = Some(new_params);
+            info!("MAP-E FMR route updated");
+        }
         ParamsDiff::BrChanged => {
             let tunnel_ifindex = state
                 .tunnel_ifindex
@@ -204,11 +232,54 @@ pub async fn cleanup(
     Ok(())
 }
 
+/// 起動時クリーンアップ: 既存の MAP-E 由来設定を削除する
+///
+/// デーモン再起動時に前回の残存設定を除去して冪等性を確保する。
+/// nft テーブルの不在や tc・トンネル削除の失敗はエラーとしない。
+pub async fn startup_cleanup(
+    config: &Config,
+    rtnetlink: &rtnetlink::Handle,
+) -> Result<(), MapEError> {
+    use nix::net::if_::if_nametoindex;
+
+    // nft テーブル削除（存在しない場合は無視）
+    let output = std::process::Command::new("nft")
+        .args(["delete", "table", "ip", "mapeced"])
+        .output()
+        .map_err(|e| MapEError::NftError(format!("failed to run nft: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.contains("No such file or directory")
+            && !stderr.contains("Could not process rule")
+        {
+            return Err(MapEError::NftError(format!(
+                "nft delete table failed: {stderr}"
+            )));
+        }
+    }
+
+    // 既存トンネルがあれば tc + トンネル削除
+    if if_nametoindex(config.tunnel_interface.as_str()).is_ok() {
+        // tc qdisc 削除（エラーは無視）
+        let _ = std::process::Command::new("tc")
+            .args(["qdisc", "del", "dev", &config.tunnel_interface, "clsact"])
+            .output();
+
+        // トンネルインターフェース削除（エラーは無視）
+        let _ = tunnel::delete_tunnel(rtnetlink, &config.tunnel_interface).await;
+    }
+
+    Ok(())
+}
+
 /// params の差分種別
 #[derive(Debug, PartialEq)]
 pub enum ParamsDiff {
     /// 変化なし
     NoChange,
+    /// FMR フラグのみ変化（CE IPv6・BR は変化なし）
+    FmrChanged,
     /// BR アドレスのみ変化（CE IPv6 は変化なし）
     BrChanged,
     /// CE IPv6 アドレス変化（最優先: IPv4・PSID・ポートセットも連動変化）
@@ -221,6 +292,8 @@ pub fn params_diff(old: &MapeParams, new: &MapeParams) -> ParamsDiff {
         ParamsDiff::CeIpv6Changed
     } else if old.br_ipv6_addr != new.br_ipv6_addr {
         ParamsDiff::BrChanged
+    } else if old.is_fmr != new.is_fmr {
+        ParamsDiff::FmrChanged
     } else {
         ParamsDiff::NoChange
     }
@@ -291,6 +364,28 @@ mod tests {
         let br_new = "2001:db8::3".parse::<Ipv6Addr>().unwrap();
         let old = make_params(ce_old, br_old);
         let new = make_params(ce_new, br_new);
+        // CE IPv6 変化が最優先
+        assert_eq!(params_diff(&old, &new), ParamsDiff::CeIpv6Changed);
+    }
+
+    #[test]
+    fn test_params_diff_fmr_changed() {
+        let ce = "2001:db8::1".parse::<Ipv6Addr>().unwrap();
+        let br = "2001:db8::2".parse::<Ipv6Addr>().unwrap();
+        let old = make_params(ce, br);
+        let mut new = make_params(ce, br);
+        new.is_fmr = true;
+        assert_eq!(params_diff(&old, &new), ParamsDiff::FmrChanged);
+    }
+
+    #[test]
+    fn test_params_diff_ce_ipv6_takes_priority_over_fmr() {
+        let ce_old = "2001:db8::1".parse::<Ipv6Addr>().unwrap();
+        let ce_new = "2001:db8::9".parse::<Ipv6Addr>().unwrap();
+        let br = "2001:db8::2".parse::<Ipv6Addr>().unwrap();
+        let old = make_params(ce_old, br);
+        let mut new = make_params(ce_new, br);
+        new.is_fmr = true;
         // CE IPv6 変化が最優先
         assert_eq!(params_diff(&old, &new), ParamsDiff::CeIpv6Changed);
     }

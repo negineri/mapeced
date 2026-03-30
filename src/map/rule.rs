@@ -104,7 +104,16 @@ impl MapRule {
             port_start,
             port_end,
             is_fmr: self.is_fmr,
-            fmr_ipv4_prefix: self.ipv4_prefix,
+            fmr_ipv4_prefix: {
+                // ホストビットをクリアして正規化されたネットワークアドレスを生成する
+                let addr_u32 = u32::from(self.ipv4_prefix);
+                let mask = if self.prefix4_len == 0 {
+                    0u32
+                } else {
+                    !0u32 << (32 - self.prefix4_len as u32)
+                };
+                Ipv4Addr::from(addr_u32 & mask)
+            },
             fmr_prefix4_len: self.prefix4_len,
         })
     }

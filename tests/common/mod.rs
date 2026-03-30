@@ -35,6 +35,40 @@ pub fn dummy_mape_params() -> MapeParams {
         .expect("dummy_mape_params: try_compute failed")
 }
 
+// ── 特権チェック ──────────────────────────────────────────────────────────────
+
+/// 現在プロセスの effective UID が 0（root）かどうかを返す。
+#[allow(dead_code)]
+pub fn is_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(2)) // effective UID
+                .and_then(|uid| uid.parse::<u32>().ok())
+        })
+        .map(|uid| uid == 0)
+        .unwrap_or(false)
+}
+
+/// `CAP_NET_ADMIN`（root 相当）がなければテストをスキップするマクロ。
+///
+/// 非特権環境で実行された場合はメッセージを表示して関数から即 return する。
+/// `sudo -E cargo test` で実行した場合は何もせず続行する。
+#[macro_export]
+macro_rules! require_cap_net_admin {
+    () => {
+        if !common::is_root() {
+            eprintln!(
+                "SKIPPED: CAP_NET_ADMIN required — run with: \
+                 sudo -E cargo test -- --test-threads=1"
+            );
+            return;
+        }
+    };
+}
+
 // ── Linux 専用ヘルパー ─────────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
@@ -96,6 +130,13 @@ mod linux {
             // 現在のスレッドを新しい名前空間に切り替える
             nix::sched::setns(netns_fd.as_fd(), CloneFlags::CLONE_NEWNET)
                 .map_err(|e| anyhow::anyhow!("setns: {e}"))?;
+
+            // 新しい名前空間の lo を UP にする（デフォルトは DOWN）
+            let status = std::process::Command::new("ip")
+                .args(["link", "set", "lo", "up"])
+                .status()
+                .map_err(|e| anyhow::anyhow!("ip link set lo up: {e}"))?;
+            anyhow::ensure!(status.success(), "ip link set lo up failed in netns {}", name);
 
             Ok(Self { name, original_fd })
         }

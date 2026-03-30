@@ -9,7 +9,7 @@ mod common;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use mapeced::config::Config;
-use mapeced::daemon::lifecycle::{apply, cleanup, update};
+use mapeced::daemon::lifecycle::{apply, cleanup, startup_cleanup, update};
 use mapeced::daemon::state::DaemonState;
 use mapeced::map::rule::{MapRule, PortParams};
 use mapeced::map::static_rules::CeCalcMethod;
@@ -164,6 +164,7 @@ async fn assert_fully_cleaned(
 /// lc_01: apply() — RFC 7597 形式の初回適用でシステム全体が設定される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_01_apply_rfc7597() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -191,6 +192,7 @@ async fn lc_01_apply_rfc7597() {
 /// lc_02: apply() — v6plus CE 計算で CE IPv6 が正しく設定される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_02_apply_v6plus_ce_addr() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -227,6 +229,7 @@ async fn lc_02_apply_v6plus_ce_addr() {
 /// lc_03: apply() — FMR あり の場合に FMR ルートが追加される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_03_apply_with_fmr() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -254,6 +257,7 @@ async fn lc_03_apply_with_fmr() {
 /// lc_04: update() — BR アドレス変更でトンネルのリモートエンドポイントが更新される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_04_update_br_change() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -289,6 +293,7 @@ async fn lc_04_update_br_change() {
 /// lc_05: update() — IA_PD プレフィックス変更（CE IPv6 変化）で全設定が再設定される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_05_update_ce_ipv6_change() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -352,6 +357,7 @@ async fn lc_05_update_ce_ipv6_change() {
 /// lc_06: update() — FMR なし → あり で FMR ルートが追加される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_06_update_fmr_none_to_some() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -391,6 +397,7 @@ async fn lc_06_update_fmr_none_to_some() {
 /// lc_07: update() — FMR あり → なし で FMR ルートが削除される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_07_update_fmr_some_to_none() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -453,6 +460,7 @@ async fn lc_07_update_fmr_some_to_none() {
 /// lc_08: update() — パラメータ変化なし → Netlink/nft 呼び出しがスキップされる。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_08_update_no_change_is_noop() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -494,6 +502,7 @@ async fn lc_08_update_no_change_is_noop() {
 /// lc_09: cleanup() — apply 後にクリーンアップでトンネル・アドレス・ルートが全て削除される。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_09_cleanup_after_apply() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -524,6 +533,7 @@ async fn lc_09_cleanup_after_apply() {
 /// lc_10: cleanup() — 未適用状態でのクリーンアップはエラーにならない（冪等）。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_10_cleanup_without_apply_is_ok() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -548,6 +558,7 @@ async fn lc_10_cleanup_without_apply_is_ok() {
 /// lc_11: apply() → cleanup() → apply() — 2 回目の apply が正常に動作する。
 #[tokio::test(flavor = "current_thread")]
 async fn lc_11_apply_cleanup_apply() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -583,4 +594,55 @@ async fn lc_11_apply_cleanup_apply() {
 
     let tnl_idx = state.tunnel_ifindex.expect("tunnel_ifindex after 2nd apply");
     assert_fully_applied(&handle, &params, tnl_idx).await;
+}
+
+/// lc_12: startup_cleanup() — apply() で設定を残した後に startup_cleanup() を呼ぶと残存設定が除去される。
+#[tokio::test(flavor = "current_thread")]
+async fn lc_12_startup_cleanup_removes_stale_config() {
+    require_cap_net_admin!();
+    let _ns = TestNetns::new().expect("TestNetns::new failed");
+    let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
+    tokio::spawn(conn);
+
+    let config = test_config();
+    let nft = NftManager::new();
+    let tc = TcManager;
+    let params = rfc_params();
+
+    let mut state = DaemonState {
+        params: None,
+        pending_map_rules: vec![],
+        tunnel_ifindex: None,
+        wan_ifindex: LO_IFINDEX,
+    };
+
+    // apply() で設定を作る（"前回起動時の残存設定" に見立てる）
+    apply(&mut state, params.clone(), &config, &handle, &nft, &tc)
+        .await
+        .expect("apply failed");
+    assert!(
+        link_exists(&handle, TNL_NAME).await,
+        "tunnel should exist after apply"
+    );
+
+    // startup_cleanup() → 残存設定を除去
+    startup_cleanup(&config, &handle)
+        .await
+        .expect("startup_cleanup failed");
+
+    // トンネルインターフェースが削除されている
+    assert!(
+        !link_exists(&handle, TNL_NAME).await,
+        "tunnel should be removed by startup_cleanup"
+    );
+
+    // nft テーブルが削除されている
+    let nft_result = std::process::Command::new("nft")
+        .args(["list", "table", "ip", "mapeced"])
+        .output()
+        .expect("nft command failed");
+    assert!(
+        !nft_result.status.success(),
+        "nft table should be removed by startup_cleanup"
+    );
 }

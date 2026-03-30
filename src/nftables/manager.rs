@@ -232,26 +232,26 @@ impl TcManager {
             "tc filter add dev {tunnel_iface} egress handle 0x54/0xff fw action csum ip4h tcp continue"
         ));
         cmds.push(format!(
-            "tc filter add dev {tunnel_iface} egress handle 0x54/0xfe fw action pedit pedit munge ip sport set \"0x{psid_val:04x}\" retain 0x{psid_mask:04x} continue"
+            "tc filter add dev {tunnel_iface} egress handle 0x54/0xfe fw action pedit pedit munge offset 20 u16 set 0x{psid_val:04x} retain 0x{psid_mask:04x} continue"
         ));
         for i in 0..a - 1 {
             let c_bit = 1u32 << (m + i);
             let s_bit = 1u32 << (m + psid_len as u32 + i);
             cmds.push(format!(
                 "tc filter add dev {tunnel_iface} egress u32 match mark 0x54 0x000000fe \
-                match ip sport 0x{c_bit:04x} 0x{c_bit:04x} action pedit pedit munge ip sport set 0x{s_bit:04x} retain 0x{s_bit:04x} continue"
+                match ip sport 0x{c_bit:04x} 0x{c_bit:04x} action pedit pedit munge offset 20 u16 set 0x{s_bit:04x} retain 0x{s_bit:04x} continue"
             ));
         }
         cmds.push(format!(
             "tc filter add dev {tunnel_iface} egress u32 match mark 0x54 0x000000fe \
-            match ip sport 0x0000 0x{top_c_bit:04x} action pedit pedit munge ip sport set 0x0000 retain 0x8000 continue"
+            match ip sport 0x0000 0x{top_c_bit:04x} action pedit pedit munge offset 20 u16 set 0x0000 retain 0x8000 continue"
         ));
 
         // ── Egress ICMP echo request (type 8) ──────────────────────────────────
         // identifier フィールド: IP offset 24 (= nexthdr+4)  mark: 0x59
 
         cmds.push(format!(
-            "tc filter add dev {tunnel_iface} egress u32 match mark 0x59 0x000000ff action pedit pedit munge offset 24 u16 set \"0x{psid_val:04x}\" retain 0x{psid_mask:04x} pipe action csum ip4h icmp continue"
+            "tc filter add dev {tunnel_iface} egress u32 match mark 0x59 0x000000ff action pedit pedit munge offset 24 u16 set 0x{psid_val:04x} retain 0x{psid_mask:04x} pipe action csum ip4h icmp continue"
         ));
         for i in 0..a - 1 {
             let c_bit = 1u32 << (m + i);
@@ -276,7 +276,7 @@ impl TcManager {
             "tc filter add dev {tunnel_iface} ingress handle 0x64/0xff fw action csum ip4h tcp continue"
         ));
         cmds.push(format!(
-            "tc filter add dev {tunnel_iface} ingress handle 0x64/0xfe fw action pedit pedit munge ip dport set 0x8000 retain 0xf000 continue"
+            "tc filter add dev {tunnel_iface} ingress handle 0x64/0xfe fw action pedit pedit munge offset 22 u16 set 0x8000 retain 0xf000 continue"
         ));
         for i in 0..a {
             // 16 = psid_offset + psid_len + m
@@ -284,20 +284,20 @@ impl TcManager {
             let c_bit = 1u32 << (16 - 1 - (i + psid_len as u32));
             cmds.push(format!(
                 "tc filter add dev {tunnel_iface} ingress u32 match mark 0x64 0x000000fe \
-                match ip dport 0x{s_bit:04x} 0x{s_bit:04x} action pedit pedit munge ip dport set 0x{c_bit:04x} retain 0x{c_bit:04x} continue"
+                match ip dport 0x{s_bit:04x} 0x{s_bit:04x} action pedit pedit munge offset 22 u16 set 0x{c_bit:04x} retain 0x{c_bit:04x} continue"
             ));
         }
         cmds.push(format!(
             "tc filter add dev {tunnel_iface} ingress u32 match mark 0x64 0x000000fe \
-            action pedit pedit munge ip dport set 0 retain 0x{psid_mask:04x} continue"
+            action pedit pedit munge offset 22 u16 set 0 retain 0x{psid_mask:04x} continue"
         ));
         cmds.push(format!(
             "tc filter add dev {tunnel_iface} ingress u32 match ip protocol 17 0xff \
-            match u16 0 1fff at 6 match ip dport \"0x{psid_val:04x}\" 0x{psid_mask:04x} action skbedit mark 0x65/0xff continue"
+            match u16 0 1fff at 6 match ip dport 0x{psid_val:04x} 0x{psid_mask:04x} action skbedit mark 0x65/0xff continue"
         ));
         cmds.push(format!(
             "tc filter add dev {tunnel_iface} ingress u32 match ip protocol 6 0xff \
-            match u16 0 1fff at 6 match ip dport \"0x{psid_val:04x}\" 0x{psid_mask:04x} action skbedit mark 0x64/0xff continue"
+            match u16 0 1fff at 6 match ip dport 0x{psid_val:04x} 0x{psid_mask:04x} action skbedit mark 0x64/0xff continue"
         ));
 
         // ── Ingress ICMP echo reply (type 0) ────────────────────────────────────
@@ -322,7 +322,7 @@ impl TcManager {
         ));
         cmds.push(format!(
             "tc filter add dev {tunnel_iface} ingress u32 match ip protocol 1 0xff \
-            match ip icmp_type 0 0xff match ip ihl 0x5 0xf match u16 0 1fff at 6 match u16 \"0x{psid_val:04x}\" 0x{psid_mask:04x} at 24 action skbedit mark 0x69/0xff continue"
+            match ip icmp_type 0 0xff match ip ihl 0x5 0xf match u16 0 1fff at 6 match u16 0x{psid_val:04x} 0x{psid_mask:04x} at 24 action skbedit mark 0x69/0xff continue"
         ));
 
         // ── Ingress ICMP error messages ─────────────────────────────────────────
@@ -352,7 +352,7 @@ impl TcManager {
             cmds.push(format!(
                 "tc filter add dev {tunnel_iface} ingress u32 match ip protocol 1 0xff \
                 match ip icmp_type {icmp_type} 0xff match ip ihl 0x5 0xf match ip ihl 0x5 0xf at 28 \
-                match u16 0 1fff at 6 match ip sport \"0x{psid_val:04x}\" 0x{psid_mask:04x} at 48 action skbedit mark 0x79/0xff continue"
+                match u16 0 1fff at 6 match ip sport 0x{psid_val:04x} 0x{psid_mask:04x} at 48 action skbedit mark 0x79/0xff continue"
             ));
         }
 
@@ -569,7 +569,7 @@ mod tests {
         assert!(cmd.contains("match mark 0x54 0x000000fe"), "cmd = {cmd}");
         assert!(cmd.contains("match ip sport 0x0010 0x0010"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip sport set 0x1000 retain 0x1000"),
+            cmd.contains("pedit munge offset 20 u16 set 0x1000 retain 0x1000"),
             "cmd = {cmd}"
         );
     }
@@ -583,7 +583,7 @@ mod tests {
         assert!(cmd.contains("match mark 0x54 0x000000fe"), "cmd = {cmd}");
         assert!(cmd.contains("match ip sport 0x0000 0x0080"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip sport set 0x0000 retain 0x8000"),
+            cmd.contains("pedit munge offset 20 u16 set 0x0000 retain 0x8000"),
             "cmd = {cmd}"
         );
     }
@@ -597,7 +597,7 @@ mod tests {
         let cmd = &cmds[3];
         assert!(cmd.contains("handle 0x54/0xfe fw"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip sport set \"0x0050\" retain 0x0ff0"),
+            cmd.contains("pedit munge offset 20 u16 set 0x0050 retain 0x0ff0"),
             "cmd = {cmd}"
         );
     }
@@ -608,7 +608,7 @@ mod tests {
         let params = make_v6plus_params(0, 1);
         let cmds = TcManager::generate_tc_commands(&params, "ip6tnl0");
         assert!(
-            cmds[3].contains("pedit munge ip sport set \"0x0000\" retain 0x0ff0"),
+            cmds[3].contains("pedit munge offset 20 u16 set 0x0000 retain 0x0ff0"),
             "cmd = {}",
             cmds[3]
         );
@@ -626,7 +626,7 @@ mod tests {
         assert!(cmd.contains("ingress"), "cmd = {cmd}");
         assert!(cmd.contains("match ip protocol 6 0xff"), "cmd = {cmd}");
         assert!(cmd.contains("match u16 0 1fff at 6"), "cmd = {cmd}");
-        assert!(cmd.contains("\"0x0050\" 0x0ff0"), "cmd = {cmd}");
+        assert!(cmd.contains("0x0050 0x0ff0"), "cmd = {cmd}");
         assert!(cmd.contains("skbedit mark 0x64/0xff"), "cmd = {cmd}");
     }
 
@@ -638,7 +638,7 @@ mod tests {
         let cmd = &cmds[15];
         assert!(cmd.contains("handle 0x64/0xfe fw"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip dport set 0x8000 retain 0xf000"),
+            cmd.contains("pedit munge offset 22 u16 set 0x8000 retain 0xf000"),
             "cmd = {cmd}"
         );
     }
@@ -652,7 +652,7 @@ mod tests {
         assert!(cmd.contains("match mark 0x64 0x000000fe"), "cmd = {cmd}");
         assert!(cmd.contains("match ip dport 0x1000 0x1000"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip dport set 0x0010 retain 0x0010"),
+            cmd.contains("pedit munge offset 22 u16 set 0x0010 retain 0x0010"),
             "cmd = {cmd}"
         );
     }
@@ -665,7 +665,7 @@ mod tests {
         let cmd = &cmds[15];
         assert!(cmd.contains("handle 0x64/0xfe fw"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge ip dport set 0x8000 retain 0xf000"),
+            cmd.contains("pedit munge offset 22 u16 set 0x8000 retain 0xf000"),
             "cmd = {cmd}"
         );
     }
@@ -693,7 +693,7 @@ mod tests {
         let cmd = &cmds[8];
         assert!(cmd.contains("match mark 0x59 0x000000ff"), "cmd = {cmd}");
         assert!(
-            cmd.contains("pedit munge offset 24 u16 set \"0x0050\" retain 0x0ff0"),
+            cmd.contains("pedit munge offset 24 u16 set 0x0050 retain 0x0ff0"),
             "cmd = {cmd}"
         );
         assert!(cmd.contains("csum ip4h icmp"), "cmd = {cmd}");
@@ -710,7 +710,7 @@ mod tests {
         assert!(cmd.contains("ingress"), "cmd = {cmd}");
         assert!(cmd.contains("match ip protocol 1 0xff"), "cmd = {cmd}");
         assert!(cmd.contains("match ip icmp_type 0 0xff"), "cmd = {cmd}");
-        assert!(cmd.contains("\"0x0050\" 0x0ff0 at 24"), "cmd = {cmd}");
+        assert!(cmd.contains("0x0050 0x0ff0 at 24"), "cmd = {cmd}");
         assert!(cmd.contains("skbedit mark 0x69/0xff"), "cmd = {cmd}");
     }
 
@@ -738,7 +738,7 @@ mod tests {
         let cmds = TcManager::generate_tc_commands(&params, "ip6tnl0");
         let cmd = &cmds[36];
         assert!(cmd.contains("match ip icmp_type 3 0xff"), "cmd = {cmd}");
-        assert!(cmd.contains("\"0x0050\" 0x0ff0 at 48"), "cmd = {cmd}");
+        assert!(cmd.contains("0x0050 0x0ff0 at 48"), "cmd = {cmd}");
         assert!(cmd.contains("skbedit mark 0x79/0xff"), "cmd = {cmd}");
     }
 
@@ -763,7 +763,7 @@ mod tests {
         let cmds = TcManager::generate_tc_commands(&params, "ip6tnl0");
         let cmd = &cmds[43];
         assert!(cmd.contains("match ip icmp_type 11 0xff"), "cmd = {cmd}");
-        assert!(cmd.contains("\"0x0050\" 0x0ff0 at 48"), "cmd = {cmd}");
+        assert!(cmd.contains("0x0050 0x0ff0 at 48"), "cmd = {cmd}");
     }
 
     // ── PSID 埋め込み確認 ────────────────────────────────────────────────────
@@ -773,7 +773,7 @@ mod tests {
         let params = make_v6plus_params(5, 1);
         let cmds = TcManager::generate_tc_commands(&params, "ip6tnl0");
         // egress PSID 挿入ルールに psid_val (0x0050) が含まれること
-        assert!(cmds[3].contains("\"0x0050\""), "cmd = {}", cmds[3]);
+        assert!(cmds[3].contains("0x0050"), "cmd = {}", cmds[3]);
         // ingress TCP マーク付けルールに psid_val (0x0050) が含まれること
         assert!(cmds[22].contains("0x0050"), "cmd = {}", cmds[22]);
     }

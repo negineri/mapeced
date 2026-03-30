@@ -89,7 +89,7 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
     };
 
     // 5. 起動時クリーンアップ（再起動時の冪等性確保）
-    startup_cleanup(&config, &handle).await?;
+    lifecycle::startup_cleanup(&config, &handle).await?;
 
     // シグナルハンドラ
     let mut sigterm = tokio::signal::unix::signal(
@@ -146,39 +146,6 @@ pub async fn run(config: Config) -> Result<(), MapEError> {
     Ok(())
 }
 
-/// 起動時クリーンアップ: 既存の MAP-E 由来設定を削除する
-async fn startup_cleanup(
-    config: &Config,
-    handle: &rtnetlink::Handle,
-) -> Result<(), MapEError> {
-    // nft テーブル削除
-    let output = std::process::Command::new("nft")
-        .args(["delete", "table", "ip", "mapeced"])
-        .output()
-        .map_err(|e| MapEError::NftError(format!("failed to run nft: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.contains("No such file or directory") && !stderr.contains("Could not process rule") {
-            return Err(MapEError::NftError(format!(
-                "nft delete table failed: {stderr}"
-            )));
-        }
-    }
-
-    // 既存トンネルがあれば tc + トンネル削除
-    if if_nametoindex(config.tunnel_interface.as_str()).is_ok() {
-        // tc qdisc 削除（エラーは無視）
-        let _ = std::process::Command::new("tc")
-            .args(["qdisc", "del", "dev", &config.tunnel_interface, "clsact"])
-            .output();
-
-        // トンネルインターフェース削除（エラーは無視）
-        let _ = crate::netlink::tunnel::delete_tunnel(handle, &config.tunnel_interface).await;
-    }
-
-    Ok(())
-}
 
 /// IA_PD プレフィックス変化イベントの処理
 async fn handle_lease_change(

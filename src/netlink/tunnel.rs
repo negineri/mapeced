@@ -108,6 +108,15 @@ pub async fn create_tunnel(
             .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
     }
 
+    // トンネルインターフェースを UP にする（アドレス付与・ルート設定に必要）
+    handle
+        .link()
+        .set(ifindex)
+        .up()
+        .execute()
+        .await
+        .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
+
     Ok(ifindex)
 }
 

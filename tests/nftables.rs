@@ -88,6 +88,7 @@ fn tc_filter_show_egress(iface: &str) -> String {
 /// nft_01: apply() — 基本 SNAT ルール適用後にテーブルとチェーンが存在する。
 #[tokio::test(flavor = "current_thread")]
 async fn nft_01_apply_creates_table_and_chains() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (_, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -114,6 +115,7 @@ async fn nft_01_apply_creates_table_and_chains() {
 /// nft_02: apply() — SNAT ルールに正しいポートレンジが含まれる。
 #[tokio::test(flavor = "current_thread")]
 async fn nft_02_apply_contains_port_range() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (_, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -137,6 +139,7 @@ async fn nft_02_apply_contains_port_range() {
 /// nft_03: apply() 後に delete_table() → テーブルが削除される。
 #[tokio::test(flavor = "current_thread")]
 async fn nft_03_delete_table_removes_rules() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (_, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -167,6 +170,7 @@ async fn nft_03_delete_table_removes_rules() {
 /// nft_04: apply() の冪等性 — 2 回連続 apply が成功し、ルールが重複しない。
 #[tokio::test(flavor = "current_thread")]
 async fn nft_04_apply_is_idempotent() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (_, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -186,6 +190,7 @@ async fn nft_04_apply_is_idempotent() {
 /// nft_05: apply() → apply()（パラメータ更新）— 古いルールが置き換えられる。
 #[tokio::test(flavor = "current_thread")]
 async fn nft_05_second_apply_replaces_old_rules() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (_, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -193,7 +198,7 @@ async fn nft_05_second_apply_replaces_old_rules() {
     let params1 = nft_params(); // psid=5
     let old_port_start = params1.port_start;
 
-    // psid=10 の別パラメータを作成
+    // p_exclude_max=4096 → a_min=2 → port_start=32800（params1 の 32784 と異なる）
     let params2 = MapRule {
         ipv4_prefix: Ipv4Addr::new(106, 73, 0, 0),
         prefix4_len: 15,
@@ -203,7 +208,7 @@ async fn nft_05_second_apply_replaces_old_rules() {
         port_params: PortParams {
             psid_offset: 4,
             psid_len: 8,
-            psid: Some(10),
+            psid: Some(5),
         },
         br_addr: "2404:9200:225:100::64".parse::<Ipv6Addr>().unwrap(),
         is_fmr: false,
@@ -211,7 +216,7 @@ async fn nft_05_second_apply_replaces_old_rules() {
     .try_compute(
         "2404:9200:225:100::".parse::<Ipv6Addr>().unwrap(),
         80,
-        1023,
+        4096, // p_exclude_max 変更 → a_min=2 → port_start が変化
         false,
     )
     .expect("try_compute for params2 failed");
@@ -243,6 +248,7 @@ async fn nft_05_second_apply_replaces_old_rules() {
 /// tc_01: apply() — clsact qdisc が作成される。
 #[tokio::test(flavor = "current_thread")]
 async fn tc_01_apply_creates_qdisc() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -266,6 +272,7 @@ async fn tc_01_apply_creates_qdisc() {
 /// tc_02: apply() — egress フィルタが作成される。
 #[tokio::test(flavor = "current_thread")]
 async fn tc_02_apply_creates_filters() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -288,6 +295,7 @@ async fn tc_02_apply_creates_filters() {
 /// tc_03: cleanup() — qdisc 削除後に filter も消える。
 #[tokio::test(flavor = "current_thread")]
 async fn tc_03_cleanup_removes_qdisc() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
@@ -315,6 +323,7 @@ async fn tc_03_cleanup_removes_qdisc() {
 /// tc_04: apply() の冪等性 — 2 回連続 apply でエラーにならない。
 #[tokio::test(flavor = "current_thread")]
 async fn tc_04_apply_is_idempotent() {
+    require_cap_net_admin!();
     let _ns = TestNetns::new().expect("TestNetns::new failed");
     let (handle, conn) = _ns.rtnetlink_handle().expect("rtnetlink_handle failed");
     tokio::spawn(conn);
