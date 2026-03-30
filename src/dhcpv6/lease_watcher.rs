@@ -49,28 +49,18 @@ fn read_lease_prefix(path: &Path) -> Option<(Ipv6Addr, u8)> {
     None
 }
 
-/// Watch the systemd-networkd lease file for the given interface and send
-/// prefix updates via `tx`.
+/// Inner watcher logic. Takes the leases directory path and the exact
+/// filename to watch (`ifindex_name`). Exported for integration testing.
 ///
-/// Sends `Some((addr, len))` when a valid prefix is found, or `None` when
-/// the lease file is deleted.
-pub async fn run_lease_watcher(
-    ifname: &str,
+/// Sends `Some((addr, len))` when a valid prefix is found in the lease file,
+/// or `None` when the lease file is deleted or contains no IA_PD prefix.
+pub async fn run_lease_watcher_inner(
+    leases_dir: &Path,
+    ifindex_name: &str,
     tx: watch::Sender<Option<(Ipv6Addr, u8)>>,
 ) -> Result<(), MapEError> {
-    let ifindex = if_nametoindex(ifname).map_err(|e| {
-        MapEError::NetlinkError(format!("if_nametoindex({ifname}): {e}"))
-    })?;
-
-    let leases_dir = Path::new(LEASES_DIR);
-    if !leases_dir.exists() {
-        return Err(MapEError::InvalidConfig(format!(
-            "leases directory not found: {LEASES_DIR}"
-        )));
-    }
-
-    let ifindex_name = ifindex.to_string();
-    let lease_path: PathBuf = leases_dir.join(&ifindex_name);
+    let lease_path: PathBuf = leases_dir.join(ifindex_name);
+    let ifindex_os = OsStr::new(ifindex_name).to_owned();
 
     // Send initial value if lease file already exists
     if lease_path.exists() {
@@ -115,7 +105,7 @@ pub async fn run_lease_watcher(
                     let matches = event
                         .name
                         .as_deref()
-                        .map(|n| n == OsStr::new(&ifindex_name))
+                        .map(|n| n == ifindex_os.as_os_str())
                         .unwrap_or(false);
 
                     if !matches {
@@ -139,6 +129,29 @@ pub async fn run_lease_watcher(
             }
         }
     }
+}
+
+/// Watch the systemd-networkd lease file for the given interface and send
+/// prefix updates via `tx`.
+///
+/// Sends `Some((addr, len))` when a valid prefix is found, or `None` when
+/// the lease file is deleted.
+pub async fn run_lease_watcher(
+    ifname: &str,
+    tx: watch::Sender<Option<(Ipv6Addr, u8)>>,
+) -> Result<(), MapEError> {
+    let ifindex = if_nametoindex(ifname).map_err(|e| {
+        MapEError::NetlinkError(format!("if_nametoindex({ifname}): {e}"))
+    })?;
+
+    let leases_dir = Path::new(LEASES_DIR);
+    if !leases_dir.exists() {
+        return Err(MapEError::InvalidConfig(format!(
+            "leases directory not found: {LEASES_DIR}"
+        )));
+    }
+
+    run_lease_watcher_inner(leases_dir, &ifindex.to_string(), tx).await
 }
 
 #[cfg(test)]

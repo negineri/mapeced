@@ -111,15 +111,25 @@ pub async fn create_tunnel(
     Ok(ifindex)
 }
 
-/// ip6tnl トンネルインターフェースを削除する
+/// ip6tnl トンネルインターフェースを削除する（存在しない場合は成功を返す）
 pub async fn delete_tunnel(handle: &Handle, name: &str) -> Result<(), MapEError> {
-    let ifindex = get_link_index(handle, name).await?;
-    handle
+    let existing = handle
         .link()
-        .del(ifindex)
+        .get()
+        .match_name(name.to_string())
         .execute()
-        .await
-        .map_err(|e| MapEError::NetlinkError(e.to_string()))
+        .try_next()
+        .await;
+
+    if let Ok(Some(msg)) = existing {
+        handle
+            .link()
+            .del(msg.header.index)
+            .execute()
+            .await
+            .map_err(|e| MapEError::NetlinkError(e.to_string()))?;
+    }
+    Ok(())
 }
 
 /// トンネルが既に存在する場合は削除して再作成する（初回 apply・CE IPv6 変化時に使用）
