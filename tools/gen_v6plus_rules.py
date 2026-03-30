@@ -7,15 +7,10 @@ https://ipv4.web.fc2.com/map-e.html から 3 テーブル
 assets/static_rules.json を生成する。
 
 使用方法:
-    # URL から自動取得（デフォルト）
     python tools/gen_v6plus_rules.py --output assets/static_rules.json
 
-    # 既存の JS ファイルを使用
-    python tools/gen_v6plus_rules.py --input docs/v6plus-maprule.js \
-        --output assets/static_rules.json
-
 更新手順:
-    1. 本スクリプトを実行する（--input 省略で自動取得）
+    1. 本スクリプトを実行する
     2. 生成物をコミットする
 
 検証:
@@ -23,6 +18,8 @@ assets/static_rules.json を生成する。
 """
 
 import argparse
+import datetime
+import hashlib
 import ipaddress
 import json
 import re
@@ -30,7 +27,6 @@ import sys
 import tempfile
 import urllib.request
 from dataclasses import dataclass
-from typing import Optional
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -87,11 +83,12 @@ DEFAULT_BR_ADDR = "2001:380:a120::9"
 DEFAULT_URL = "https://ipv4.web.fc2.com/map-e.html"
 
 
-def fetch_and_extract_js(url: str) -> tuple[str, str]:
+def fetch_and_extract_js(url: str) -> tuple[str, str, str]:
     """URL から HTML を取得し、テーブルを含む script ブロックを抽出する。
 
     Returns:
-        (js_content, tmp_path) — 抽出した JS テキストと保存先の一時ファイルパス。
+        (js_content, tmp_path, source_hash) — 抽出した JS テキスト、保存先の一時ファイルパス、
+        HTML バイト列の SHA-256 ハッシュ（"sha256:<hex>" 形式）。
     """
     req = urllib.request.Request(
         url,
@@ -99,6 +96,8 @@ def fetch_and_extract_js(url: str) -> tuple[str, str]:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         html_bytes = resp.read()
+
+    source_hash = "sha256:" + hashlib.sha256(html_bytes).hexdigest()
 
     # 一時ファイルに HTML を保存
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".html", delete=False) as tmp:
@@ -117,7 +116,7 @@ def fetch_and_extract_js(url: str) -> tuple[str, str]:
     # ruleprefix38 を含むブロックを探す
     for block in script_blocks:
         if "ruleprefix38" in block:
-            return block, tmp_path
+            return block, tmp_path, source_hash
 
     raise ValueError(f"ページ内に ruleprefix38 テーブルが見つかりませんでした: {url}")
 
@@ -319,9 +318,14 @@ def rule_to_json_entry(r: MapRuleData) -> dict:
     }
 
 
-def generate_json(rules: list[MapRuleData]) -> str:
+def generate_json(rules: list[MapRuleData], generated_at: str, source_hash: str) -> str:
     """MapRuleData のリストから assets/static_rules.json 形式の JSON を生成する。"""
-    lines = ["{\n", '  "rules": [\n']
+    lines = [
+        "{\n",
+        f'  "generated_at": {json.dumps(generated_at)},\n',
+        f'  "source_hash": {json.dumps(source_hash)},\n',
+        '  "rules": [\n',
+    ]
     for i, r in enumerate(rules):
         entry = rule_to_json_entry(r)
         comma = "," if i < len(rules) - 1 else ""
@@ -339,28 +343,20 @@ def generate_json(rules: list[MapRuleData]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="v6plus MAP ルール生成スクリプト")
     parser.add_argument(
-        "--input",
-        help="入力 JS ファイルパス（省略時は --url から自動取得）",
-    )
-    parser.add_argument(
         "--url",
         default=DEFAULT_URL,
-        help=f"取得元 HTML URL（--input 省略時に使用、デフォルト: {DEFAULT_URL}）",
+        help=f"取得元 HTML URL（デフォルト: {DEFAULT_URL}）",
     )
     parser.add_argument("--output", required=True, help="出力 JSON ファイルパス")
     args = parser.parse_args()
 
-    if args.input:
-        # 既存動作: ローカルファイルから読み込み
-        with open(args.input, "r", encoding="utf-8") as f:
-            js_content = f.read()
-        input_label = args.input
-    else:
-        # URL から HTML を取得して JS を抽出
-        print(f"取得中: {args.url}", file=sys.stderr)
-        js_content, tmp_path = fetch_and_extract_js(args.url)
-        print(f"HTML を一時保存: {tmp_path}", file=sys.stderr)
-        input_label = args.url
+    print(f"取得中: {args.url}", file=sys.stderr)
+    js_content, tmp_path, source_hash = fetch_and_extract_js(args.url)
+    print(f"HTML を一時保存: {tmp_path}", file=sys.stderr)
+
+    generated_at = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
     # テーブルパラメータ検証
     for table_name, params in TABLE_PARAMS.items():
@@ -389,7 +385,7 @@ def main() -> None:
 
     if len(all_rules) == 0:
         print(
-            "エラー: ルールが 0 件です。入力ファイルを確認してください。",
+            "エラー: ルールが 0 件です。取得した HTML を確認してください。",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -397,7 +393,7 @@ def main() -> None:
     print(f"合計: {len(all_rules)} エントリ", file=sys.stderr)
 
     # JSON 生成
-    json_content = generate_json(all_rules)
+    json_content = generate_json(all_rules, generated_at, source_hash)
 
     # 出力ファイル書き込み
     with open(args.output, "w", encoding="utf-8") as f:
