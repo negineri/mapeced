@@ -248,7 +248,6 @@ mod tests {
             port_ranges: vec![(32784, 32799)],
             port_start: 32784,
             port_end: 33023,
-            a_min: 1,
             is_fmr: false,
             fmr_ipv4_prefix: Ipv4Addr::UNSPECIFIED,
             fmr_prefix4_len: 0,

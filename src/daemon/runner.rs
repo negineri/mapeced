@@ -170,10 +170,7 @@ async fn startup_cleanup(
     if if_nametoindex(config.tunnel_interface.as_str()).is_ok() {
         // tc qdisc 削除（エラーは無視）
         let _ = std::process::Command::new("tc")
-            .args(["qdisc", "del", "dev", &config.tunnel_interface, "root"])
-            .output();
-        let _ = std::process::Command::new("tc")
-            .args(["qdisc", "del", "dev", &config.tunnel_interface, "ingress"])
+            .args(["qdisc", "del", "dev", &config.tunnel_interface, "clsact"])
             .output();
 
         // トンネルインターフェース削除（エラーは無視）

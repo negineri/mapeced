@@ -103,7 +103,6 @@ impl MapRule {
             port_ranges,
             port_start,
             port_end,
-            a_min,
             is_fmr: self.is_fmr,
             fmr_ipv4_prefix: self.ipv4_prefix,
             fmr_prefix4_len: self.prefix4_len,
@@ -138,8 +137,6 @@ pub struct MapeParams {
     pub port_ranges: Vec<(u16, u16)>, // 利用可能ポートレンジ一覧（MAP-E ポート集合 S）
     pub port_start: u16,              // nftables SNAT 用連続レンジ開始（ポート集合 C の先頭）
     pub port_end: u16,                // nftables SNAT 用連続レンジ終了（ポート集合 C の末尾）
-    /// 実効的な R 下限。`calc_a_min` の結果。
-    pub a_min: u16,
     /// マッチした `MapRule::is_fmr` の値。`try_compute` が `self.is_fmr` をそのままコピーする。
     pub is_fmr: bool,
     /// マッチした `MapRule::ipv4_prefix`。FMR ルート設定時（`is_fmr == true`）に使用する。
