@@ -1,0 +1,5 @@
+upstream_interface = "eth0"
+tunnel_interface   = "mape0"
+static_rule        = true
+ce_calc            = "draft"
+tunnel_mtu         = 1460

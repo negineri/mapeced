@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        if [ -x "/usr/bin/systemctl" ]; then
+            if systemctl is-active --quiet mapeced 2>/dev/null; then
+                systemctl stop mapeced
+            fi
+            if systemctl is-enabled --quiet mapeced 2>/dev/null; then
+                systemctl disable mapeced
+            fi
+        fi
+    ;;
+esac
+
+#DEBHELPER#

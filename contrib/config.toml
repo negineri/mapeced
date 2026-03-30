@@ -1,0 +1,25 @@
+# mapeced 設定ファイル
+# デフォルトパス: /etc/mapeced/config.toml
+# 起動時に --config <path> オプションで変更できます。
+
+# ── インターフェース設定（必須）────────────────────────────────────────────
+
+# WAN 側インターフェース名
+upstream_interface = "eth0"
+
+# MAP-E トンネルインターフェース名
+tunnel_interface = "mape0"
+
+# ── オプション設定 ────────────────────────────────────────────────────────
+
+# トンネルインターフェースの MTU（バイト）
+# IPv6 ヘッダー 40 bytes 分を差し引いた値を推奨
+# tunnel_mtu = 1460
+
+# 組み込み静的 MAP ルールを使用する場合は true
+# static_rule = true
+
+# CE IPv6 アドレスの計算方式（デフォルト: "rfc7597"）
+# "rfc7597" : RFC 7597 標準方式
+# "draft"   : Internet Draft 方式（v6プラス・OCN VC 等）
+# ce_calc = "draft"
